@@ -1,0 +1,2 @@
+{"timestamp": "2025-09-11T16:11:07.399570Z", "to": "you@example.com", "subject": "Test Alert", "body_snippet": "This is a test.", "send_result": {"status": "ok", "detail": "sent to you@example.com via Gmail"}}
+{"timestamp": "2025-09-11T16:12:04.902450Z", "to": "disaster@gmail.com", "subject": "Floods", "body_snippet": "Flood aagya bchoo hume", "send_result": {"status": "ok", "detail": "sent to disaster@gmail.com via Gmail"}}

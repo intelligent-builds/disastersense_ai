@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Disaster Response - Home</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" crossorigin="anonymous">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+  <style>
+    body { padding-bottom:40px; }
+    .demo-section { margin-top: 32px; margin-bottom: 48px; }
+    .panel-result { min-height:120px; display:flex; align-items:center; justify-content:space-between; }
+    .result-json { background:#f8f8f8; padding:12px; margin-top:10px; border-radius:6px; font-family:monospace; white-space:pre-wrap; max-height:240px; overflow:auto; }
+    .badge-risk { font-size:14px; padding:8px 12px; border-radius:4px; color:#fff; }
+    .badge-risk.low { background:#2ecc71; }      /* green */
+    .badge-risk.medium { background:#f1c40f; }   /* yellow */
+    .badge-risk.high { background:#e74c3c; }     /* red */
+    .card { border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.08); padding:16px; background:#fff; }
+    .well { border-radius:8px; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-inverse navbar-fixed-top">
+  <div class="container">
+    <div class="navbar-header"><a class="navbar-brand" href="/">Disaster Response</a></div>
+  </div>
+</nav>
+
+<div class="jumbotron" style="margin-top:50px;">
+  <div class="container">
+    <h1 class="text-center">Disaster Response Project</h1>
+    <p class="text-center">Classify messages • Predict disasters • Send alerts</p>
+
+    <div class="row" style="margin-top:18px">
+      <div class="col-md-10 col-md-offset-1">
+        <form action="/go" method="get" class="form-inline text-center">
+          <div class="form-group" style="width:75%">
+            <input style="width:100%" type="text" class="form-control input-lg" name="query" placeholder="Enter a message to classify — e.g. 'We need water and shelter'">
+          </div>
+          <button class="btn btn-lg btn-success">Classify Message</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="page-header">
+    <h2 class="text-center">Overview of Training Dataset</h2>
+  </div>
+
+  <div id="graphs" class="row">
+    <div class="col-md-12">
+      {% for id in ids %}
+        <div id="{{id}}" style="margin-bottom:18px;"></div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <hr>
+    <h3 class="text-center">Disaster Predictions — Demo Controls</h3>
+
+    <div class="row" style="margin-top:20px;">
+      <div class="col-md-6">
+        <div class="card">
+          <form id="quakeForm">
+            <h4>Earthquake Prediction</h4>
+            <div class="form-inline">
+              <div class="form-group" style="width:30%"><input class="form-control" name="lat" type="number" step="any" value="9.0" placeholder="Latitude"></div>
+              <div class="form-group" style="width:30%"><input class="form-control" name="lon" type="number" step="any" value="76.9" placeholder="Longitude"></div>
+              <div class="form-group" style="width:30%"><input class="form-control" name="depth" type="number" step="any" value="15" placeholder="Depth (km)"></div>
+              <button class="btn btn-primary" style="margin-left:6px">Predict</button>
+            </div>
+          </form>
+
+          <div id="quakeCard" class="panel-result" style="margin-top:12px;">
+            <div>
+              <strong>Result:</strong>
+              <div id="quakeBadge" style="margin-top:6px"><span class="badge-risk low">No result yet</span></div>
+            </div>
+            <div style="width:55%">
+              <div id="quakeResult" class="result-json">Result will appear here</div>
+            </div>
+          </div>
+        </div>
+      </div> <!-- /col -->
+
+      <div class="col-md-6">
+        <div class="card">
+          <form id="floodForm">
+            <h4>Flood Prediction</h4>
+            <div class="form-inline">
+              <div class="form-group" style="width:45%"><input class="form-control" name="rainfall_mm" type="number" value="120" placeholder="Rainfall (mm)"></div>
+              <div class="form-group" style="width:45%"><input class="form-control" name="dam_capacity_percent" type="number" value="85" placeholder="Dam capacity %"></div>
+              <button class="btn btn-primary" style="margin-left:6px">Predict</button>
+            </div>
+          </form>
+
+          <div id="floodCard" class="panel-result" style="margin-top:12px;">
+            <div>
+              <strong>Flood risk:</strong>
+              <div id="floodBadge" style="margin-top:6px"><span class="badge-risk low">No result yet</span></div>
+            </div>
+            <div style="width:55%">
+              <div id="floodResult" class="result-json">Result will appear here</div>
+            </div>
+          </div>
+        </div>
+      </div> <!-- /col -->
+    </div> <!-- /row -->
+
+    <div class="row" style="margin-top:20px;">
+      <div class="col-md-6">
+        <div class="card">
+          <form id="tsunamiForm">
+            <h4>Tsunami Prediction</h4>
+            <div class="form-inline">
+              <div class="form-group" style="width:30%"><input class="form-control" name="magnitude" type="number" step="any" value="7.1" placeholder="Magnitude"></div>
+              <div class="form-group" style="width:30%"><input class="form-control" name="depth" type="number" step="any" value="30" placeholder="Depth (km)"></div>
+              <div class="form-group" style="width:30%"><input class="form-control" name="distance_to_coast_km" type="number" step="any" value="50" placeholder="Distance (km)"></div>
+              <button class="btn btn-primary" style="margin-left:6px">Predict</button>
+            </div>
+          </form>
+
+          <div id="tsunamiCard" class="panel-result" style="margin-top:12px;">
+            <div>
+              <strong>Tsunami risk:</strong>
+              <div id="tsunamiBadge" style="margin-top:6px"><span class="badge-risk low">No result yet</span></div>
+            </div>
+            <div style="width:55%">
+              <div id="tsunamiResult" class="result-json">Result will appear here</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="card">
+          <h4>Send Quick Alert</h4>
+          <form id="alertForm" class="form-vertical">
+            <div class="form-group"><input class="form-control" name="to" type="email" value="you@example.com" placeholder="To (email)"></div>
+            <div class="form-group"><input class="form-control" name="subject" type="text" value="Test Alert" placeholder="Subject"></div>
+            <div class="form-group"><textarea class="form-control" name="body" rows="3">This is a test.</textarea></div>
+            <div style="display:flex; gap:8px;">
+              <button id="alertSendBtn" class="btn btn-danger">Send</button>
+              <button id="alertRefreshBtn" class="btn btn-default" type="button">Refresh Recent</button>
+            </div>
+            <div style="margin-top:8px"><span id="alertStatus"></span></div>
+          </form>
+
+          <div style="margin-top:10px;">
+            <h5>Recent Alerts</h5>
+            <div id="alertsList" class="result-json">Loading…</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // render plotly graphs
+  const graphsData = {{graphJSON | safe}};
+  const graphIds = {{ids | safe}};
+  for (let i in graphsData) Plotly.newPlot(graphIds[i], graphsData[i].data, graphsData[i].layout);
+
+  // helper fetch
+  async function postJSON(url, data) {
+    try {
+      const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+      return await res.json();
+    } catch (e) { return { error: String(e) }; }
+  }
+  async function getJSON(url) {
+    try { const res = await fetch(url); return await res.json(); } catch(e) { return []; }
+  }
+
+  // map risk->class (text)
+  function riskClassForValue(riskOrProb, mode) {
+    // mode: 'risk' expects string 'low|medium|high'
+    // mode: 'prob' expects numeric 0..1
+    if (mode === 'risk') {
+      const r = (riskOrProb || '').toString().toLowerCase();
+      if (r.includes('high')) return 'high';
+      if (r.includes('med')) return 'medium';
+      return 'low';
+    } else {
+      const p = Number(riskOrProb || 0);
+      if (p >= 0.75) return 'high';
+      if (p >= 0.4) return 'medium';
+      return 'low';
+    }
+  }
+  function updateBadge(elId, mode, val) {
+    const cls = riskClassForValue(val, mode);
+    const el = document.getElementById(elId);
+    el.innerHTML = `<span class="badge-risk ${cls}">${cls.toUpperCase()}</span>`;
+  }
+
+  // Earthquake handler
+  document.getElementById('quakeForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target;
+    const payload = { lat: parseFloat(f.lat.value), lon: parseFloat(f.lon.value), depth: parseFloat(f.depth.value) };
+    document.getElementById('quakeResult').textContent = 'Loading…';
+    updateBadge('quakeBadge','risk','');
+    const res = await postJSON('/predict/earthquake', payload);
+    document.getElementById('quakeResult').textContent = JSON.stringify(res, null, 2);
+    // server uses "risk" key (string) -> color badge
+    updateBadge('quakeBadge','risk', res.risk || '');
+  });
+
+  // Flood handler
+  document.getElementById('floodForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target;
+    const payload = { rainfall_mm: parseFloat(f.rainfall_mm.value), dam_capacity_percent: parseFloat(f.dam_capacity_percent.value) };
+    document.getElementById('floodResult').textContent = 'Loading…';
+    updateBadge('floodBadge','prob', '');
+    const res = await postJSON('/predict/flood', payload);
+    document.getElementById('floodResult').textContent = JSON.stringify(res, null, 2);
+    // use flood_probability field if present
+    const prob = (res && (res.flood_probability || res.probability || res.prob)) || 0;
+    updateBadge('floodBadge','prob', prob);
+  });
+
+  // Tsunami handler
+  document.getElementById('tsunamiForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target;
+    const payload = { magnitude: parseFloat(f.magnitude.value), depth: parseFloat(f.depth.value), distance_to_coast_km: parseFloat(f.distance_to_coast_km.value) };
+    document.getElementById('tsunamiResult').textContent = 'Loading…';
+    updateBadge('tsunamiBadge','risk','');
+    const res = await postJSON('/predict/tsunami', payload);
+    document.getElementById('tsunamiResult').textContent = JSON.stringify(res, null, 2);
+    updateBadge('tsunamiBadge','risk', res.risk || '');
+  });
+
+  // Alerts: send + refresh list
+  async function loadRecentAlerts() {
+    const el = document.getElementById('alertsList');
+    el.textContent = 'Loading…';
+    const rec = await getJSON('/alerts/logs?n=25');
+    if (!rec || rec.length === 0) { el.textContent = 'No alerts yet'; return; }
+    let html = '<ul style="list-style:none;padding-left:0;margin:0">';
+    rec.forEach(r => {
+      const ts = r.timestamp || ''; const subj = r.subject || ''; const to = r.to || '';
+      const status = (r.send_result && r.send_result.status) || (r.status||'unknown');
+      const snippet = (r.body_snippet || '').slice(0,200);
+      html += `<li style="padding:8px;border-bottom:1px solid #eee"><strong>${escapeHtml(subj)}</strong> <small class="text-muted">(${escapeHtml(ts)})</small><div>to: <em>${escapeHtml(to)}</em> • status: ${escapeHtml(status)}</div><div style="margin-top:6px">${escapeHtml(snippet)}</div></li>`;
+    });
+    html += '</ul>';
+    el.innerHTML = html;
+  }
+  document.getElementById('alertForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target; const payload = { to: f.to.value, subject: f.subject.value, body: f.body.value };
+    document.getElementById('alertStatus').innerHTML = '<span class="label label-info">Sending…</span>';
+    const res = await postJSON('/alerts/send', payload);
+    if (res && res.status === 'ok') { document.getElementById('alertStatus').innerHTML = '<span class="label label-success">Sent</span>'; f.reset(); loadRecentAlerts(); }
+    else { document.getElementById('alertStatus').innerHTML = `<span class="label label-danger">Error: ${escapeHtml(res.detail||JSON.stringify(res))}</span>`; }
+  });
+  document.getElementById('alertRefreshBtn').addEventListener('click', loadRecentAlerts);
+  function escapeHtml(t){ if(!t) return ''; return String(t).replace(/[&<>"'`=\/]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','`':'&#x60;','=':'&#x3D;'}[s])); }
+
+  // initial load
+  loadRecentAlerts();
+</script>
+
+</body>
+</html>

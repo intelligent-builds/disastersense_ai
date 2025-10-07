@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Classification Result</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" crossorigin="anonymous">
+  <style>
+    body { padding-top:70px; background:#f7f9fb; }
+    .hero { background:#fff; padding:20px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.06); }
+    .positive-badge { margin:4px; display:inline-block; padding:6px 10px; background:#2ecc71; color:#fff; border-radius:20px; font-weight:600; }
+    .category-table { background:#fff; border-radius:8px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,0.04); }
+    .copy-btn { margin-left:8px; }
+    pre.msg { background:#f1f1f1; padding:12px; border-radius:6px; font-family:monospace; }
+    .label-action { cursor:pointer; }
+  </style>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+</head>
+<body>
+<nav class="navbar navbar-default navbar-fixed-top"><div class="container"><div class="navbar-header"><a class="navbar-brand" href="/">Disaster Response</a></div></div></nav>
+
+<div class="container">
+  <div class="hero">
+    <div class="row">
+      <div class="col-md-9">
+        <h3>Message classification result</h3>
+        <p class="text-muted">Below is the model's classification and quick actions.</p>
+        <h4>Message</h4>
+        <pre class="msg" id="theMessage">{{ query }}</pre>
+        <div style="margin-top:8px">
+          <a href="/report?prefill={{ query }}" class="btn btn-danger">🚨 Report This Emergency</a>
+          <button id="copyBtn" class="btn btn-default copy-btn">Copy message</button>
+          <a href="/" class="btn btn-link">Back to Home</a>
+
+        </div>
+      </div>
+      <div class="col-md-3 text-right">
+        <h5>Quick view</h5>
+        <div id="positivesBlock">
+          {% set positives = [] %}
+          {% for cat, val in classification_result.items() %}
+            {% if val in [1, '1', True, 'True'] %}
+              <span class="positive-badge">{{ cat }}</span>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:18px"></div>
+
+  <div class="category-table">
+    <h4>All categories</h4>
+    <div style="max-height:420px; overflow:auto;">
+      <table class="table table-condensed table-hover">
+        <thead><tr><th>Category</th><th>Prediction</th></tr></thead>
+        <tbody>
+          {% for cat, val in classification_result.items() %}
+            <tr class="{{ 'success' if val in [1,'1',True,'True'] else '' }}">
+              <td style="text-transform:capitalize">{{ cat.replace('_',' ') }}</td>
+              <td style="font-weight:700">{{ val }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="height:18px"></div>
+
+  <div id="sendAlertPanel" style="display:none; margin-top:12px;">
+    <div class="panel panel-default">
+      <div class="panel-body">
+        <h4>Send alert (prefill)</h4>
+        <form id="prefillAlertForm" class="form-inline">
+          <div class="form-group"><input placeholder="To (email)" class="form-control" name="to" value="you@example.com"></div>
+          <div class="form-group" style="width:40%"><input placeholder="Subject" class="form-control" name="subject" value="Emergency alert"></div>
+          <div class="form-group" style="width:60%"><input placeholder="Body" class="form-control" name="body" id="alertBody"></div>
+          <button class="btn btn-danger" style="margin-left:8px">Send</button>
+        </form>
+        <div id="prefillResult" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // copy button
+  document.getElementById('copyBtn').addEventListener('click', function(){
+    const t = document.getElementById('theMessage').innerText;
+    navigator.clipboard && navigator.clipboard.writeText(t);
+    alert('Message copied to clipboard');
+  });
+
+  // show alert prefill panel and prefill the body
+  document.getElementById('sendAlertBtn').addEventListener('click', function(){
+    const msg = document.getElementById('theMessage').innerText;
+    document.getElementById('alertBody').value = msg;
+    document.getElementById('sendAlertPanel').style.display = 'block';
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  });
+
+  // send prefilled alert
+  document.getElementById('prefillAlertForm').addEventListener('submit', async function(e){
+    e.preventDefault();
+    const form = e.target;
+    const payload = { to: form.to.value, subject: form.subject.value, body: form.body.value };
+    document.getElementById('prefillResult').innerHTML = '<span class="label label-info">Sending…</span>';
+    try {
+      const res = await fetch('/alerts/send', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+      const data = await res.json();
+      if (data && data.status === 'ok') {
+        document.getElementById('prefillResult').innerHTML = '<span class="label label-success">Sent ✓</span>';
+      } else {
+        document.getElementById('prefillResult').innerHTML = `<span class="label label-danger">Error: ${data.detail || JSON.stringify(data)}</span>`;
+      }
+    } catch (err) {
+      document.getElementById('prefillResult').innerHTML = `<span class="label label-danger">Error: ${err.message}</span>`;
+    }
+  });
+</script>
+</body>
+</html>

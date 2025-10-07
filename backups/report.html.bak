@@ -1,0 +1,211 @@
+<!-- app/templates/report.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CitizenSOS — Report an Emergency</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; max-width:900px; margin:24px auto; padding:12px; color:#222; }
+    h1 { margin-bottom:8px; }
+    textarea { width:100%; padding:10px; font-size:16px; box-sizing:border-box; }
+    input[type="text"] { padding:8px; font-size:14px; width:180px; box-sizing:border-box; }
+    .row { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+    button { padding:8px 12px; font-size:15px; cursor:pointer; border-radius:6px; border:1px solid #888; background:#f5f5f5; }
+    .out { white-space:pre-wrap; background:#fafafa; border:1px solid #eee; padding:12px; margin-top:12px; border-radius:6px; }
+    .meta { font-size:14px; color:#333; margin-top:8px; }
+    .helper { padding:6px 8px; border-radius:6px; background:#f0f7ff; margin:6px 0; }
+    .small { font-size:13px; color:#555; }
+    .tag { display:inline-block; background:#0d6efd; color:#fff; padding:4px 8px; margin:4px 4px 0 0; border-radius:4px; font-size:13px; }
+    .tag-muted { display:inline-block; background:#6c757d; color:#fff; padding:3px 7px; margin:4px 4px 0 0; border-radius:4px; font-size:12px; }
+    .ml-box { margin-top:12px; padding:10px; border-radius:6px; background:#fffaf0; border:1px solid #fff0d6; }
+  </style>
+</head>
+<body>
+  <h1>CitizenSOS — Report an Emergency</h1>
+  <p class="small">Describe what is happening. Add GPS if available or use <strong>Use my location</strong>.</p>
+
+  <form id="repForm">
+    <label for="message"><strong>Message</strong></label><br>
+    <textarea id="message" name="message" rows="5" placeholder="e.g. Building collapsed near Padukkad, 3 people trapped" required>{{ prefill }}</textarea>
+
+    <div class="row">
+      <div>
+        <label for="lat">Latitude</label><br>
+        <input id="lat" name="lat" type="text" placeholder="optional" />
+      </div>
+      <div>
+        <label for="lon">Longitude</label><br>
+        <input id="lon" name="lon" type="text" placeholder="optional" />
+      </div>
+
+      <div style="margin-left:8px;">
+        <button id="useLoc" type="button">Use my location</button>
+      </div>
+
+      <div style="margin-left:auto">
+        <button id="sendBtn" type="submit">Send Report</button>
+      </div>
+    </div>
+  </form>
+
+  <div id="result" class="out" style="display:none;"></div>
+
+<script>
+async function geoLocateAndFill() {
+  const out = document.getElementById('result');
+  out.style.display = 'block';
+  out.textContent = 'Attempting to get your location from the browser...';
+  if (!navigator.geolocation) {
+    out.textContent = 'Geolocation not supported by this browser.';
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
+    document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
+    out.textContent = 'Location filled ✔ — you can now submit the report.';
+  }, function(err) {
+    out.textContent = 'Could not get location: ' + (err.message || 'permission denied');
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+}
+
+function createTag(text, muted) {
+  const span = document.createElement('span');
+  span.className = muted ? 'tag-muted' : 'tag';
+  span.textContent = text;
+  return span;
+}
+
+function prettyPrintResponse(j) {
+  if (!j) return 'No response';
+  // Primary textual summary (keeps the look you already had)
+  let s = [];
+  if (j.status) s.push('Status: ' + j.status);
+  if (j.report_id) s.push('Report ID: ' + j.report_id);
+  if (typeof j.is_emergency !== 'undefined') s.push('Is emergency: ' + j.is_emergency);
+  if (typeof j.urgency !== 'undefined') s.push('Urgency score: ' + j.urgency);
+  if (j.location_text) s.push('Resolved location: ' + j.location_text);
+  if (j.resolved_lat && j.resolved_lon) {
+    const maps = `https://www.google.com/maps/search/?api=1&query=${j.resolved_lat},${j.resolved_lon}`;
+    s.push('Map: ' + maps);
+  }
+  if (j.assigned_helpers && j.assigned_helpers.length) {
+    s.push('\nAssigned helpers:');
+    j.assigned_helpers.forEach(h => {
+      s.push(` • ${h.name || 'helper'} (id:${h.helper_id || '?'}, ${h.dist_km || '?'} km, email:${h.email || 'N/A'})`);
+    });
+  } else {
+    s.push('Assigned helpers: none');
+  }
+  return s.join('\n');
+}
+
+function renderMLInfo(container, ml) {
+  // ml is expected as object: { category_name: 0/1, ... } optionally with ml_confidence
+  container.innerHTML = ''; // clear
+  if (!ml || Object.keys(ml).length === 0) {
+    const e = document.createElement('div');
+    e.className = 'ml-box';
+    e.textContent = 'AI did not return any category predictions for this message.';
+    container.appendChild(e);
+    return;
+  }
+
+  // If there's an ml_confidence field, show it
+  if (ml.ml_confidence !== undefined && ml.ml_confidence !== null) {
+    const conf = document.createElement('div');
+    conf.className = 'small';
+    conf.style.marginBottom = '6px';
+    conf.textContent = 'Model confidence: ' + ml.ml_confidence;
+    container.appendChild(conf);
+  }
+
+  // Show predicted categories (value 1)
+  const predicted = [];
+  for (const k of Object.keys(ml)) {
+    if (k === 'ml_confidence') continue;
+    if (ml[k] == 1 || ml[k] === true) predicted.push(k);
+  }
+
+  const box = document.createElement('div');
+  box.className = 'ml-box';
+  if (predicted.length) {
+    const title = document.createElement('div');
+    title.style.marginBottom = '6px';
+    title.textContent = 'AI predicted categories:';
+    box.appendChild(title);
+    predicted.forEach(cat => box.appendChild(createTag(cat, false)));
+  } else {
+    const title = document.createElement('div');
+    title.textContent = 'AI predicted categories:';
+    title.style.marginBottom = '6px';
+    box.appendChild(title);
+    box.appendChild(createTag('none', true));
+  }
+
+  container.appendChild(box);
+}
+
+document.getElementById('useLoc').addEventListener('click', function(e){
+  geoLocateAndFill();
+});
+
+document.getElementById('repForm').addEventListener('submit', async function(e){
+  e.preventDefault();
+  const sendBtn = document.getElementById('sendBtn');
+  sendBtn.disabled = true;
+  sendBtn.textContent = 'Sending...';
+
+  const message = document.getElementById('message').value.trim();
+  const latVal = document.getElementById('lat').value.trim();
+  const lonVal = document.getElementById('lon').value.trim();
+  const payload = { message: message };
+  if (latVal) payload.lat = Number(latVal);
+  if (lonVal) payload.lon = Number(lonVal);
+
+  const out = document.getElementById('result');
+  out.style.display = 'block';
+  out.textContent = 'Sending report...';
+
+  try {
+    const resp = await fetch('/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const j = await resp.json().catch(()=>null);
+    if (!j) {
+      out.textContent = 'No JSON response from server (status ' + resp.status + ')';
+    } else {
+      // show textual summary
+      out.textContent = prettyPrintResponse(j);
+
+      // add quick map link when map available
+      if (j.resolved_lat && j.resolved_lon) {
+        const mapA = document.createElement('div');
+        mapA.innerHTML = '<br><a target="_blank" href="https://www.google.com/maps/search/?api=1&query='
+                         + encodeURIComponent(j.resolved_lat + ',' + j.resolved_lon)
+                         + '">Open in Google Maps</a>';
+        out.appendChild(mapA);
+      }
+
+      // Show ML predictions below textual summary
+      const mlContainer = document.createElement('div');
+      mlContainer.style.marginTop = '12px';
+      try {
+        renderMLInfo(mlContainer, j.ml_info || j.ml_categories || {});
+      } catch (err) {
+        mlContainer.textContent = 'Error rendering ML info: ' + String(err);
+      }
+      out.appendChild(mlContainer);
+    }
+  } catch (err) {
+    out.textContent = 'Error sending request: ' + (err && err.message ? err.message : String(err));
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send Report';
+  }
+});
+</script>
+</body>
+</html>
