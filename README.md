@@ -105,9 +105,6 @@ The **Flask web interface** provides three dashboards:
 - **Rescuer Dashboard** → Receive automated assignments and update response status  
 - **Admin Dashboard** → Monitor all operations in real time  
 
-Screenshots:  
-*(add `docs/dashboard.png`, `docs/user_page.png`, etc. when available)*
-
 ---
 
 ## 🧰 Installation and Usage
@@ -117,15 +114,11 @@ Install dependencies:
 ```bash
 pip install -r requirements.txt
 ▶️ Run the Flask Application
-bash
-Copy code
 python app.py
 The application will be live at:
 👉 http://127.0.0.1:5000/
 
 🧠 Train/Run the Model
-bash
-Copy code
 python train_model.py
 python predict_disaster.py
 🔒 Ethical & Privacy Considerations
@@ -161,12 +154,6 @@ For questions, collaborations, or deployment discussions:
 
 ⭐ If you found this project helpful, please star the repository on GitHub!
 
-yaml
-Copy code
-
----
-
-Would you like me to now give you the **exact sentence (in IEEE-style)** that you should add inside your **research paper’s methodology or conclusion** section to reference this GitHub link officially?
 
 
 
