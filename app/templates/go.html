@@ -1,124 +1,543 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Classification Result</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" crossorigin="anonymous">
+  <meta charset="utf-8" />
+  <title>Report Emergency — Live Rescue Tracking</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    body { padding-top:70px; background:#f7f9fb; }
-    .hero { background:#fff; padding:20px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.06); }
-    .positive-badge { margin:4px; display:inline-block; padding:6px 10px; background:#2ecc71; color:#fff; border-radius:20px; font-weight:600; }
-    .category-table { background:#fff; border-radius:8px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,0.04); }
-    .copy-btn { margin-left:8px; }
-    pre.msg { background:#f1f1f1; padding:12px; border-radius:6px; font-family:monospace; }
-    .label-action { cursor:pointer; }
+    /* ---------- Light theme global ---------- */
+    :root{
+      --bg:#f6f9fc; --card:#ffffff; --muted:#6b7280; --accent:#ef4444; --accent-2:#2563eb;
+      --success:#10b981; --radius:12px; --glass: rgba(255,255,255,0.7);
+    }
+    *{box-sizing:border-box}
+    body{ margin:0; font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:var(--bg); color:#111; -webkit-font-smoothing:antialiased;}
+    .container{ max-width:1100px; margin:28px auto; padding:18px; }
+
+    header.appbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
+    .brand{ display:flex; align-items:center; gap:12px; }
+    .logo{ width:48px; height:48px; border-radius:10px; background:linear-gradient(135deg,#fff,#fee); display:flex; align-items:center; justify-content:center; box-shadow:0 6px 20px rgba(16,24,40,0.06); font-weight:800; color:var(--accent-2); }
+    h1{ margin:0; font-size:18px; }
+    .tagline{ color:var(--muted); font-size:13px; margin-top:3px; }
+
+    /* layout */
+    .grid{ display:grid; grid-template-columns: 1fr 440px; gap:18px; align-items:start; }
+    @media (max-width:1000px){ .grid{ grid-template-columns: 1fr; } }
+
+    /* left column card */
+    .card{ background:var(--card); border-radius:var(--radius); padding:14px; box-shadow: 0 8px 30px rgba(20,30,40,0.04); }
+    .form-row{ display:flex; gap:8px; margin-bottom:10px; }
+    textarea#message{ width:100%; min-height:110px; padding:12px; border-radius:10px; border:1px solid #e8eef8; font-size:14px; resize:vertical; }
+    .controls{ display:flex; gap:8px; margin-top:8px; align-items:center; flex-wrap:wrap; }
+    .btn{ padding:10px 12px; border-radius:10px; border:0; cursor:pointer; background:#fff; box-shadow:0 6px 18px rgba(16,24,40,0.03); }
+    .btn.primary{ background:var(--accent-2); color:#fff; }
+    .btn.ghost{ background:transparent; border:1px solid #e6eef6; }
+
+    .small{ font-size:13px; color:var(--muted); }
+
+    /* right column: live card */
+    .live-card { position:sticky; top:20px; }
+    .alert-pill{ display:inline-flex; gap:8px; align-items:center; padding:8px 10px; border-radius:999px; background: linear-gradient(90deg, rgba(255,235,238,1), rgba(255,247,245,1)); color:var(--accent); font-weight:700; box-shadow:0 4px 14px rgba(239,68,68,0.06); }
+    .summary{ font-weight:700; margin-top:6px; font-size:16px; }
+    .urgency{ font-weight:800; color:#111; margin-top:8px; font-size:13px; }
+    .meta-row{ display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+
+    /* map */
+    #mini-map{ width:100%; height:300px; border-radius:10px; margin-top:12px; }
+
+    /* helpers list */
+    .helper { display:flex; gap:10px; padding:12px; border-radius:8px; background:#fbfbfb; margin-top:10px; align-items:center; border:1px solid #f0f3f7; }
+    .helper .left{ flex:1; }
+    .helper h4{ margin:0; font-size:15px; }
+    .helper p{ margin:4px 0 0; color:var(--muted); font-size:13px; }
+    .helper .right{ text-align:right; min-width:140px; }
+    .eta-badge{ font-weight:800; color:#111; font-size:16px; }
+    .phone-link{ display:inline-block; margin-top:6px; color:var(--accent-2); text-decoration:none; font-weight:700; }
+
+    /* success overlay */
+    .success { border-left:4px solid var(--success); padding:12px; border-radius:8px; background:linear-gradient(180deg,#ffffff,#fbfffd); margin-bottom:12px; }
+
+    /* footer tiny */
+    .foot { margin-top:16px; color:var(--muted); font-size:13px; text-align:center; }
+
+    /* spinner small */
+    .spinner { width:16px;height:16px;border-radius:50%; border:2px solid #e7eefb; border-top-color:var(--accent-2); animation:spin .9s linear infinite; display:inline-block; vertical-align:middle; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* countdown */
+    .countdown { font-weight:800; color:var(--accent); font-size:18px; }
+
+    /* pretty card headings */
+    .section-title{ font-weight:700; margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
   </style>
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
 </head>
 <body>
-<nav class="navbar navbar-default navbar-fixed-top"><div class="container"><div class="navbar-header"><a class="navbar-brand" href="/">Disaster Response</a></div></div></nav>
-
-<div class="container">
-  <div class="hero">
-    <div class="row">
-      <div class="col-md-9">
-        <h3>Message classification result</h3>
-        <p class="text-muted">Below is the model's classification and quick actions.</p>
-        <h4>Message</h4>
-        <pre class="msg" id="theMessage">{{ query }}</pre>
-        <div style="margin-top:8px">
-          <a href="/report?prefill={{ query }}" class="btn btn-danger">🚨 Report This Emergency</a>
-          <button id="copyBtn" class="btn btn-default copy-btn">Copy message</button>
-          <a href="/" class="btn btn-link">Back to Home</a>
-
+  <div class="container">
+    <header class="appbar card">
+      <div class="brand">
+        <div class="logo">DR</div>
+        <div>
+          <h1>Disaster Response Portal</h1>
+          <div class="tagline small">Report an emergency — get help fast. Live ETA & rescuer info shown here.</div>
         </div>
       </div>
-      <div class="col-md-3 text-right">
-        <h5>Quick view</h5>
-        <div id="positivesBlock">
-          {% set positives = [] %}
-          {% for cat, val in classification_result.items() %}
-            {% if val in [1, '1', True, 'True'] %}
-              <span class="positive-badge">{{ cat }}</span>
-            {% endif %}
-          {% endfor %}
+      <div>
+        <div class="small">Status: <strong id="serverStatus">OK</strong></div>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- LEFT: Report form and results -->
+      <div>
+        <section class="card" id="reportCard">
+          <div class="section-title">
+            <div>
+              <div class="small">Step 1</div>
+              <h2 style="margin:0">Report an emergency</h2>
+            </div>
+            <div class="small">All reports are handled as urgent by default</div>
+          </div>
+
+          <div>
+            <label for="message" class="small">Describe what happened (short):</label>
+            <textarea id="message" placeholder="E.g. Building collapsed near MG Road, Bangalore — people trapped, need urgent help."></textarea>
+          </div>
+
+          <div style="margin-top:8px;">
+            <label class="small">Your location (optional):</label>
+            <div class="form-row">
+              <input id="lat" type="text" placeholder="Latitude" style="padding:10px;border-radius:8px;border:1px solid #e8eef8;flex:1" />
+              <input id="lon" type="text" placeholder="Longitude" style="padding:10px;border-radius:8px;border:1px solid #e8eef8;flex:1" />
+              <button class="btn ghost" id="useGpsBtn" title="Use browser GPS">Use GPS</button>
+            </div>
+            <div class="small" style="margin-top:6px">Tip: if you don't provide location, your device GPS will be requested (if available).</div>
+          </div>
+
+          <div class="controls" style="margin-top:12px;">
+            <button class="btn primary" id="sendBtn">Send Report</button>
+            <button class="btn" id="clearBtn">Clear</button>
+            <div id="sendingSpinner" style="display:none"><span class="spinner"></span> Sending...</div>
+          </div>
+
+          <div id="resultArea" style="margin-top:12px; display:none;">
+            <!-- populated dynamically -->
+          </div>
+        </section>
+
+        <!-- Additional info / tips -->
+        <section class="card" style="margin-top:14px">
+          <div class="section-title"><div><strong>Safety tips</strong></div></div>
+          <ul class="small" style="margin:0 0 0 18px; padding:0;">
+            <li>Move to a safe area if possible and avoid entering unstable structures.</li>
+            <li>Try to give a short description and location to help teams reach you fast.</li>
+            <li>If you can, stay on the line and follow rescuers' instructions.</li>
+          </ul>
+        </section>
+      </div>
+
+      <!-- RIGHT: Live tracking / assigned helper -->
+      <aside class="live-card">
+        <div class="card">
+          <div class="alert-pill">🚨 Live Rescue Tracking</div>
+          <div id="liveContent" style="margin-top:12px;">
+            <div class="small">No active report yet. After sending a report, details will appear here.</div>
+          </div>
         </div>
-      </div>
-    </div>
+      </aside>
+    </main>
+
+    <div class="foot small">Built for demo — no location data is shared with third parties in this local demo.</div>
   </div>
 
-  <div style="height:18px"></div>
+  <!-- Leaflet + util -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  // ---------- Config ----------
+  const REPORTS_ENDPOINT = "/reports"; // POST
+  const RECOMPUTE_ENDPOINT = (id) => `/report/${id}/recompute_eta`; // POST
+  const ETA_REFRESH_SEC = 30; // refresh every 30s (recompute ETA)
+  let autoEtaTimer = null;
+  let currentReport = null; // store last returned report object
 
-  <div class="category-table">
-    <h4>All categories</h4>
-    <div style="max-height:420px; overflow:auto;">
-      <table class="table table-condensed table-hover">
-        <thead><tr><th>Category</th><th>Prediction</th></tr></thead>
-        <tbody>
-          {% for cat, val in classification_result.items() %}
-            <tr class="{{ 'success' if val in [1,'1',True,'True'] else '' }}">
-              <td style="text-transform:capitalize">{{ cat.replace('_',' ') }}</td>
-              <td style="font-weight:700">{{ val }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+  // ---------- Utility ----------
+  function el(q){ return document.querySelector(q); }
+  function create(tag, props={}, children=[]){
+    const d = document.createElement(tag);
+    for(const k in props){
+      if(k === "class") d.className = props[k];
+      else if(k === "html") d.innerHTML = props[k];
+      else d.setAttribute(k, props[k]);
+    }
+    children.forEach(c => d.appendChild(c));
+    return d;
+  }
 
-  <div style="height:18px"></div>
+  function friendlyTimeFromSeconds(s){
+    if(s === null || s === undefined) return "N/A";
+    s = Math.round(s);
+    if(s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if(m < 60) return `${m} min`;
+    const h = Math.floor(m/60);
+    return `${h} hr`;
+  }
 
-  <div id="sendAlertPanel" style="display:none; margin-top:12px;">
-    <div class="panel panel-default">
-      <div class="panel-body">
-        <h4>Send alert (prefill)</h4>
-        <form id="prefillAlertForm" class="form-inline">
-          <div class="form-group"><input placeholder="To (email)" class="form-control" name="to" value="you@example.com"></div>
-          <div class="form-group" style="width:40%"><input placeholder="Subject" class="form-control" name="subject" value="Emergency alert"></div>
-          <div class="form-group" style="width:60%"><input placeholder="Body" class="form-control" name="body" id="alertBody"></div>
-          <button class="btn btn-danger" style="margin-left:8px">Send</button>
-        </form>
-        <div id="prefillResult" style="margin-top:8px"></div>
-      </div>
-    </div>
-  </div>
-</div>
+  // ---------- Map setup (created only when needed) ----------
+  let map = null;
+  let userMarker = null;
+  let helperMarkers = [];
+  let routeLine = null;
+  function ensureMap(containerId="mini-map", lat=20.5937, lon=78.9629, zoom=6){
+    if(map) return;
+    // create container
+    const mapWrap = document.createElement("div");
+    mapWrap.id = containerId;
+    mapWrap.style.width = "100%";
+    mapWrap.style.height = "300px";
+    mapWrap.style.borderRadius = "10px";
+    const liveContent = el("#liveContent");
+    liveContent.appendChild(mapWrap);
 
-<script>
-  // copy button
-  document.getElementById('copyBtn').addEventListener('click', function(){
-    const t = document.getElementById('theMessage').innerText;
-    navigator.clipboard && navigator.clipboard.writeText(t);
-    alert('Message copied to clipboard');
-  });
+    map = L.map(containerId, { attributionControl:false }).setView([lat, lon], zoom);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+  }
 
-  // show alert prefill panel and prefill the body
-  document.getElementById('sendAlertBtn').addEventListener('click', function(){
-    const msg = document.getElementById('theMessage').innerText;
-    document.getElementById('alertBody').value = msg;
-    document.getElementById('sendAlertPanel').style.display = 'block';
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-  });
+  function updateMap(userLat, userLon, helpers){
+    ensureMap();
+    // remove old markers
+    if(userMarker){ map.removeLayer(userMarker); userMarker = null; }
+    helperMarkers.forEach(hm => map.removeLayer(hm));
+    helperMarkers = [];
+    if(routeLine){ map.removeLayer(routeLine); routeLine = null; }
 
-  // send prefilled alert
-  document.getElementById('prefillAlertForm').addEventListener('submit', async function(e){
-    e.preventDefault();
-    const form = e.target;
-    const payload = { to: form.to.value, subject: form.subject.value, body: form.body.value };
-    document.getElementById('prefillResult').innerHTML = '<span class="label label-info">Sending…</span>';
-    try {
-      const res = await fetch('/alerts/send', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
-      const data = await res.json();
-      if (data && data.status === 'ok') {
-        document.getElementById('prefillResult').innerHTML = '<span class="label label-success">Sent ✓</span>';
-      } else {
-        document.getElementById('prefillResult').innerHTML = `<span class="label label-danger">Error: ${data.detail || JSON.stringify(data)}</span>`;
+    if(userLat && userLon){
+      userMarker = L.marker([userLat, userLon], { title: "You", riseOnHover:true }).addTo(map).bindPopup("<b>You (reporter)</b>");
+    }
+
+    const bounds = [];
+    if(userLat && userLon) bounds.push([userLat, userLon]);
+
+    for(const h of (helpers||[])){
+      if(h.lat && h.lon){
+        const hm = L.marker([h.lat, h.lon], { title: h.name || h.email }).addTo(map);
+        hm.bindPopup(`<b>${escapeHtml(h.name || h.email || "Helper")}</b><div>${escapeHtml(h.phone || "")}</div><div>${escapeHtml(h.email || "")}</div>`);
+        helperMarkers.push(hm);
+        bounds.push([h.lat, h.lon]);
       }
-    } catch (err) {
-      document.getElementById('prefillResult').innerHTML = `<span class="label label-danger">Error: ${err.message}</span>`;
+    }
+
+    if(bounds.length){
+      try {
+        map.fitBounds(bounds, { padding:[40,40] });
+      } catch(e){
+        // ignore fit failures
+      }
+    }
+
+    // draw simple straight line to first helper if both coords available
+    const first = (helpers && helpers.length) ? helpers[0] : null;
+    if(first && first.lat && first.lon && userLat && userLon){
+      routeLine = L.polyline([[userLat, userLon], [first.lat, first.lon]], { color:"#2563eb", weight:3, opacity:0.6 }).addTo(map);
+    }
+  }
+
+  function escapeHtml(s){ if(!s) return ""; return (""+s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+  // ---------- UI updates ----------
+  function showSending(sending=true){
+    el("#sendingSpinner").style.display = sending ? "inline-block" : "none";
+    el("#sendBtn").disabled = sending;
+  }
+
+  function clearForm(){
+    el("#message").value = "";
+    el("#lat").value = "";
+    el("#lon").value = "";
+  }
+
+  function renderResult(reportJson){
+    // store
+    currentReport = reportJson;
+    // build summary area
+    const area = el("#resultArea");
+    area.style.display = "block";
+    area.innerHTML = "";
+
+    // success header
+    const top = create("div", { class:"success" });
+    top.innerHTML = `<div style="font-weight:800;color:var(--accent)">Report sent — reference #${escapeHtml(reportJson.report_id || reportJson.id || "unknown")}</div>
+      <div class="small" style="margin-top:6px">${escapeHtml(reportJson.summary || reportJson.ml_info?.gemini?.summary || "")}</div>`;
+    area.appendChild(top);
+
+    // AI summary if available
+    if(reportJson.ml_info && reportJson.ml_info.gemini){
+      const g = reportJson.ml_info.gemini;
+      const div = create("div", { class:"card" });
+      div.style.marginTop = "12px";
+      div.innerHTML = `<div class="small">AI Analysis</div>
+        <div class="summary">${escapeHtml(g.disaster_type || g.summary || "Detected")}</div>
+        <div class="meta-row"><div class="small">Urgency: <strong>${escapeHtml(g.urgency || reportJson.urgency_label || "unknown")}</strong></div></div>`;
+      area.appendChild(div);
+    }
+
+    // user + helpers section
+    renderLivePanel(reportJson);
+  }
+
+  function renderLivePanel(reportJson){
+    // create or update the right-side live card content
+    const live = el("#liveContent");
+    live.innerHTML = ""; // wipe
+
+    // heading
+    const heading = create("div", { html:`<div class="small">Active report</div><div class="summary">Reference: ${escapeHtml(reportJson.report_id || reportJson.id || "unknown")}</div>` });
+    live.appendChild(heading);
+
+    // user location summary (if provided)
+    const uinfo = create("div", { class:"card" });
+    const userLat = Number(reportJson.resolved_lat || reportJson.lat || null);
+    const userLon = Number(reportJson.resolved_lon || reportJson.lon || null);
+    const locHtml = userLat && userLon ? `<div class="small">Location: ${userLat.toFixed(5)}, ${userLon.toFixed(5)}</div>` : `<div class="small">Location: not provided</div>`;
+    uinfo.innerHTML = `<div style="margin-bottom:8px">${locHtml}</div>`;
+    live.appendChild(uinfo);
+
+    // assigned helpers
+    const helpers = reportJson.assigned_helpers || [];
+    if(!helpers.length){
+      const p = create("div", { class:"card", html:`<div class="small">No rescuers assigned yet. Waiting for assignment...</div>` });
+      live.appendChild(p);
+    } else {
+      // show first helper prominently
+      const first = helpers[0];
+      const helperCard = create("div", { class:"card" });
+      let phoneHtml = first.phone ? `<a class="phone-link" href="tel:${escapeHtml(first.phone)}">📞 ${escapeHtml(first.phone)}</a>` : "";
+      helperCard.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+          <div>
+            <div class="small">Assigned rescuer</div>
+            <h4 style="margin-top:6px">${escapeHtml(first.name || first.email || "Rescue Team")}</h4>
+            <div class="small" style="margin-top:6px">${escapeHtml(first.email || "")}</div>
+            <div class="small" style="margin-top:6px">${phoneHtml}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="eta-badge" id="mainEta">${escapeHtml(first.eta || first.eta || "N/A")}</div>
+            <div class="small" id="mainDist">${first.dist_km ? `${Number(first.dist_km).toFixed(3)} km` : ""}</div>
+          </div>
+        </div>
+      `;
+      live.appendChild(helperCard);
+
+      // helpers list
+      for(const h of helpers){
+        const box = create("div", { class:"helper" });
+        box.innerHTML = `<div class="left"><h4>${escapeHtml(h.name || h.email || "Helper")}</h4><p>${escapeHtml(h.email || "")} ${h.phone ? " · " + escapeHtml(h.phone) : ""}</p></div>
+                         <div class="right"><div class="small">ETA</div><div class="eta-badge">${escapeHtml(h.eta || "N/A")}</div><div class="small">${h.dist_km ? Number(h.dist_km).toFixed(3) + " km" : ""}</div></div>`;
+        live.appendChild(box);
+      }
+
+      // map area
+      const mapWrap = create("div");
+      mapWrap.id = "mini-map";
+      mapWrap.style.marginTop = "12px";
+      mapWrap.style.height = "260px";
+      live.appendChild(mapWrap);
+
+      // status row & controls
+      const ctrl = create("div", { class:"meta-row" });
+      const btnCall = create("a", { class:"btn", href: `tel:${escapeHtml(first.phone || "")}` });
+      btnCall.textContent = first.phone ? "Call Rescuer" : "No phone";
+      ctrl.appendChild(btnCall);
+
+      const refreshBtn = create("button", { class:"btn" });
+      refreshBtn.textContent = "Refresh ETA";
+      refreshBtn.onclick = () => recomputeAndUpdate(reportJson.report_id || reportJson.id);
+      ctrl.appendChild(refreshBtn);
+
+      live.appendChild(ctrl);
+
+      // init map and markers
+      setTimeout(() => {
+        // ensure clean map
+        initAndUpdateMap(userLat||null, userLon||null, helpers);
+      }, 60);
+      // start live ETA timer
+      startLiveEtaPolling(reportJson.report_id || reportJson.id);
+    }
+  }
+
+  // ---------- Map helper ----------
+  function initAndUpdateMap(userLat, userLon, helpers){
+    // cleanup previous
+    if(window._go_map){
+      try { window._go_map.remove(); } catch(e){}
+      window._go_map = null;
+    }
+    // create map
+    const container = document.getElementById("mini-map");
+    if(!container) return;
+    window._go_map = L.map(container.id, { zoomControl:true }).setView([userLat || 20.5937, userLon || 78.9629], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(window._go_map);
+
+    // add user marker
+    if(userLat && userLon){
+      L.marker([userLat, userLon]).addTo(window._go_map).bindPopup("You (reporter)").openPopup();
+    }
+
+    // add helpers
+    const bounds = [];
+    if(userLat && userLon) bounds.push([userLat, userLon]);
+    for(const h of helpers){
+      if(h.lat && h.lon){
+        L.marker([h.lat, h.lon]).addTo(window._go_map).bindPopup(`${escapeHtml(h.name || h.email)}<br>${escapeHtml(h.phone||"")}`);
+        bounds.push([h.lat, h.lon]);
+      }
+    }
+    if(bounds.length){
+      try { window._go_map.fitBounds(bounds, { padding:[40,40] }); } catch(e){}
+    }
+    // draw route to first helper
+    const first = helpers[0];
+    if(first && first.lat && first.lon && userLat && userLon){
+      L.polyline([[userLat, userLon], [first.lat, first.lon]], { color:"#2563eb", weight:3, opacity:0.6 }).addTo(window._go_map);
+    }
+  }
+
+  // ---------- ETA polling & recompute ----------
+  async function recomputeAndUpdate(reportId){
+    if(!reportId) return;
+    try {
+      const resp = await fetch(RECOMPUTE_ENDPOINT(reportId), { method:"POST" });
+      if(!resp.ok){
+        console.warn("recompute returned", resp.status);
+        return;
+      }
+      const j = await resp.json();
+      // update main UI from returned assigned_helpers (we assume only helpers updated)
+      if(j && j.assigned_helpers){
+        // merge into currentReport and re-render live helper area only
+        currentReport.assigned_helpers = j.assigned_helpers;
+        // update main ETA and list
+        updateHelperDisplays(j.assigned_helpers);
+      }
+    } catch(e){
+      console.warn("recompute error", e);
+    }
+  }
+
+  function updateHelperDisplays(helpers){
+    // update main ETA badge
+    if(helpers && helpers.length){
+      const first = helpers[0];
+      const mainEta = el("#mainEta");
+      if(mainEta) mainEta.textContent = first.eta || friendlyTimeFromSeconds(first.eta_seconds);
+      const mainDist = el("#mainDist");
+      if(mainDist) mainDist.textContent = first.dist_km ? `${Number(first.dist_km).toFixed(3)} km` : (first.eta_distance_km ? `${Number(first.eta_distance_km).toFixed(3)} km` : "");
+      // also update per-helper entries quickly by re-rendering live panel (simple)
+      currentReport.assigned_helpers = helpers;
+      renderLivePanel(currentReport);
+    }
+  }
+
+  function startLiveEtaPolling(reportId){
+    stopLiveEtaPolling();
+    if(!reportId) return;
+    autoEtaTimer = setInterval(()=> {
+      recomputeAndUpdate(reportId);
+    }, ETA_REFRESH_SEC * 1000);
+  }
+  function stopLiveEtaPolling(){
+    if(autoEtaTimer) { clearInterval(autoEtaTimer); autoEtaTimer = null; }
+  }
+
+  // ---------- Submit handler ----------
+  el("#useGpsBtn").addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    if(!navigator.geolocation){
+      alert("GPS not supported");
+      return;
+    }
+    el("#useGpsBtn").disabled = true;
+    el("#useGpsBtn").textContent = "Getting GPS...";
+    navigator.geolocation.getCurrentPosition((pos) => {
+      el("#lat").value = pos.coords.latitude.toFixed(6);
+      el("#lon").value = pos.coords.longitude.toFixed(6);
+      el("#useGpsBtn").disabled = false;
+      el("#useGpsBtn").textContent = "Use GPS";
+    }, (err) => {
+      alert("Unable to get GPS: " + (err.message || "permission denied"));
+      el("#useGpsBtn").disabled = false;
+      el("#useGpsBtn").textContent = "Use GPS";
+    }, { enableHighAccuracy:true, timeout:10000 });
+  });
+
+  el("#clearBtn").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    clearForm();
+  });
+
+  el("#sendBtn").addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    const message = el("#message").value.trim();
+    if(!message){
+      alert("Please describe the emergency shortly.");
+      return;
+    }
+    const latVal = el("#lat").value.trim();
+    const lonVal = el("#lon").value.trim();
+    const payload = { message };
+    if(latVal && lonVal){
+      payload.lat = Number(latVal);
+      payload.lon = Number(lonVal);
+    }
+
+    try {
+      showSending(true);
+      stopLiveEtaPolling();
+      // call /reports
+      const resp = await fetch(REPORTS_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const j = await resp.json();
+      showSending(false);
+
+      if(!resp.ok){
+        alert("Error sending report: " + (j.detail || resp.status));
+        return;
+      }
+
+      // success: show result & live panel
+      renderResult(j);
+
+      // clear form or keep message? we'll keep lat/lon for possible edits
+      // clearForm();
+
+    } catch (e){
+      showSending(false);
+      console.warn("send error", e);
+      alert("Network error while sending report.");
     }
   });
-</script>
+
+  // tear down polling when page unloads
+  window.addEventListener("beforeunload", () => { stopLiveEtaPolling(); });
+
+  // On load, check server health (simple)
+  (async function init(){
+    try {
+      const r = await fetch("/health");
+      if(!r.ok) el("#serverStatus").textContent = "offline";
+    } catch(e){
+      el("#serverStatus").textContent = "offline";
+    }
+  })();
+
+  // helper: minimal HTML escaping for dynamic insert
+  function escapeHtml(s){ if(!s) return ""; return (""+s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  </script>
 </body>
 </html>

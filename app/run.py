@@ -1,4 +1,10 @@
-# app/run.py
+# run.py
+# Full application entrypoint for Disaster Response project.
+# - Integrates Gemini (advanced_analysis) if available
+# - Integrates OpenRouteService (ORS) free ETA via matrix endpoint
+# - Adds in-memory cache for ORS results, improved formatting, and stores numeric ORS fields
+# NOTE: This file contains an ORS_API_KEY constant with the token you supplied.
+
 import json
 import plotly
 import pandas as pd
@@ -26,6 +32,8 @@ import requests
 import re
 import math
 from collections import deque
+import numpy as np
+import time
 
 # helper modules (make sure you created these under src/)
 from src.preprocess import clean_text
@@ -33,6 +41,15 @@ from src.predictors.earthquake import predict_quake
 from src.predictors.flood import predict_flood
 from src.predictors.tsunami import predict_tsunami
 from src.alerts import send_email
+
+# NEW: import Gemini wrapper (your advanced_analysis module)
+# The advanced_analysis.py you added should expose gemini_analyze_text(message) -> dict|None
+try:
+    from src.advanced_analysis import gemini_analyze_text
+except Exception:
+    # fallback to a stub that returns None (Gemini unavailable)
+    def gemini_analyze_text(msg):
+        return None
 
 app = Flask(__name__)
 
@@ -121,7 +138,6 @@ keyword_map = {
     "direct_report": [
         "report", "reported", "complain", "told", "said", "direct report", "alert"
     ],
-    # You can expand this further with other categories similarly
 }
 
 # Alerts: send email and append audit log
@@ -173,29 +189,18 @@ def heuristic_emergency_score(text):
 
 # ---- REPLACED: improved place extraction + nominatim geocoding ----
 
-# small stoplist for generic place words
 PLACE_STOPWORDS = set([
     "building","house","home","here","nearby","near","site","place","area","location",
     "street","road","way","corner","block","shop","office","people","person","trapped","collapsed","collapse","injured","dead","help"
 ])
-
-# generic tokens we should not try as place names (single-word)
 GENERIC_TOKENS = set(["building","people","trapped","collapsed","collapse","injured","dead","help","here","nearby","home","where","what","who","when","why","how"])
-
-# Words that alone are likely question tokens — avoid geocoding them
 QUESTION_WORDS = set(["where","what","who","when","why","how"])
 
 def extract_place_candidates(text):
-    """Improved candidate extraction:
-    - look for 'near|at|in' patterns,
-    - split by commas and common separators,
-    - include capitalized phrases and last 2-5 words as fallbacks.
-    """
     text = (text or "").strip()
     if not text:
         return []
 
-    # patterns like "near X", "at X", "in X"
     patterns = [r'near\s+([A-Za-z0-9\s\-\_\,]+)',
                 r'at\s+([A-Za-z0-9\s\-\_\,]+)',
                 r'in\s+([A-Za-z0-9\s\-\_\,]+)']
@@ -206,28 +211,23 @@ def extract_place_candidates(text):
             if len(m) > 2 and not re.match(r'^(me|home|here|nearby)$', m.strip(), re.I):
                 candidates.append(m)
 
-    # split by punctuation for explicit place mentions
     comma_parts = [part.strip() for part in re.split(r'[,\;\-\\/]', text) if len(part.strip())>3]
     candidates.extend(comma_parts)
 
-    # include sequences of capitalized words (e.g., "MG Road", "Padukkad")
     caps = re.findall(r'([A-Z][a-z]{1,}\s(?:[A-Z][a-z]{1,}\s?){0,2})', text)
     candidates.extend([c.strip() for c in caps if len(c.strip())>2])
 
-    # fallback: last 2–5 words
     words = re.findall(r'\w+', text)
     if len(words) >= 2:
         for n in range(2, min(6, len(words)+1)):
             candidates.append(" ".join(words[-n:]))
 
-    # filter stopwords and dedupe
     seen = set(); out = []
     for c in candidates:
         key = c.lower().strip()
         tokens = [w for w in re.findall(r'\w+', key)]
         if len(tokens) == 0:
             continue
-        # drop candidates that are only stopwords/generic tokens
         if all(t in PLACE_STOPWORDS for t in tokens):
             continue
         if key not in seen:
@@ -235,9 +235,6 @@ def extract_place_candidates(text):
     return out
 
 def geocode_place_nominatim(place, countrycodes=None, timeout=8):
-    """Geocode place using Nominatim. Returns (lat, lon, display_name) or None.
-    Optional countrycodes: e.g., 'in' to bias to India.
-    """
     if not place:
         return None
     try:
@@ -315,28 +312,151 @@ def find_nearby_helpers(resolved_lat, resolved_lon, max_results=5, max_radius_km
     helpers = sorted(helpers, key=lambda x: x['dist_km'])
     return helpers[:max_results]
 
-def notify_helper_via_email(helper, report):
-    """Notify helper via email using src.alerts.send_email"""
+def get_eta_approx_km_to_minutes(dist_km, avg_speed_kmph=35):
+    """Rough ETA estimate in minutes from distance in km and average speed."""
+    try:
+        mins = max(1, int((dist_km / float(avg_speed_kmph)) * 60))
+        return f"{mins} mins"
+    except Exception:
+        return "unknown"
+
+# ---------------------------
+# OpenRouteService integration (FREE)
+# ---------------------------
+# User-provided ORS token (inserted as requested)
+ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImQ1OWM0MWRhOGZjMjQzYzM4ZTM2MjNmOTZlZGNiOTgyIiwiaCI6Im11cm11cjY0In0="
+
+def get_eta_openrouteservice(origin_lat, origin_lon, dest_lat, dest_lon):
+    """
+    Returns ETA in minutes and distance in km using OpenRouteService (free).
+    Uses the Matrix endpoint (driving-car). lon/lat ordering required by ORS.
+    Returns dict {distance_km, duration_min, duration_text, duration_s} or None on failure.
+    """
+    if not ORS_API_KEY:
+        return None
+    try:
+        url = "https://api.openrouteservice.org/v2/matrix/driving-car"
+        headers = {
+            "Authorization": ORS_API_KEY,
+            "Content-Type": "application/json"
+        }
+        # ORS expects [lon, lat]
+        payload = {
+            "locations": [
+                [float(origin_lon), float(origin_lat)],
+                [float(dest_lon), float(dest_lat)]
+            ],
+            "metrics": ["distance", "duration"]
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=8)
+        if r.status_code != 200:
+            try:
+                app.logger.warning(f"ORS matrix status {r.status_code}: {r.text[:200]}")
+            except Exception:
+                print(f"[ORS] status {r.status_code}: {r.text[:200]}")
+            return None
+        j = r.json()
+        # debug preview (short)
+        try:
+            app.logger.debug("ORS response preview: %s", json.dumps(j)[:800])
+        except Exception:
+            print("[ORS] response preview:", str(j)[:800])
+
+        # durations[0][1] is seconds from origin 0 to dest 1
+        durations = j.get("durations")
+        distances = j.get("distances")
+        if not durations or not distances:
+            return None
+        duration_s = durations[0][1]
+        distance_m = distances[0][1]
+        if duration_s is None:
+            return None
+        return {
+            "distance_km": (distance_m / 1000.0) if distance_m is not None else None,
+            "duration_min": round(duration_s / 60.0, 1),
+            "duration_text": f"{max(1, int(round(duration_s/60.0)))} mins",
+            "duration_s": duration_s
+        }
+    except Exception as e:
+        try:
+            app.logger.warning(f"ORS ETA error: {e}")
+        except Exception:
+            print(f"[ORS] ETA error: {e}")
+        return None
+
+# ---------------------------
+# Simple in-memory ETA cache (TTL)
+# ---------------------------
+_ETA_CACHE = {}
+_ETA_CACHE_TTL = 60  # seconds
+
+def _cache_key_for_eta(o_lat, o_lon, d_lat, d_lon, mode='driving'):
+    return f"{float(o_lat):.6f},{float(o_lon):.6f}->{float(d_lat):.6f},{float(d_lon):.6f}|{mode}"
+
+def get_eta_openrouteservice_cached(o_lat, o_lon, d_lat, d_lon, mode='driving'):
+    key = _cache_key_for_eta(o_lat, o_lon, d_lat, d_lon, mode)
+    now = time.time()
+    if key in _ETA_CACHE:
+        ts, val = _ETA_CACHE[key]
+        if now - ts < _ETA_CACHE_TTL:
+            return val
+    res = get_eta_openrouteservice(o_lat, o_lon, d_lat, d_lon)
+    _ETA_CACHE[key] = (now, res)
+    return res
+
+def format_duration_text(duration_text=None, duration_s=None):
+    """
+    Make short trips nicer:
+    - if duration_s < 60 -> "<1 min"
+    - else show "N min(s)" (singular/plural normalized)
+    """
+    try:
+        if duration_s is not None:
+            if duration_s < 60:
+                return "<1 min"
+            mins = int(round(duration_s/60.0))
+            return f"{mins} min" if mins == 1 else f"{mins} mins"
+        if duration_text:
+            t = duration_text.strip()
+            # normalize common patterns
+            if t.startswith("1 ") and "mins" in t:
+                return t.replace("mins", "min")
+            return t
+    except Exception:
+        pass
+    return duration_text or "unknown"
+
+def notify_helper_via_email(helper, report, eta_text=None):
+    """Notify helper via email using src.alerts.send_email. Uses provided eta_text if present."""
     subj = f"URGENT: Nearby emergency — {report.get('short_msg','')[:80]}"
     maps_link = ""
-    if report.get('resolved_lat') and report.get('resolved_lon'):
+    if report.get('resolved_lat') and report.get('resolved_lon') and helper.get('lat') and helper.get('lon'):
         maps_link = f"https://www.google.com/maps/search/?api=1&query={report['resolved_lat']},{report['resolved_lon']}"
+    # prefer provided eta_text; otherwise compute simple ETA
+    eta_display = eta_text
+    if not eta_display:
+        try:
+            if report.get('resolved_lat') and report.get('resolved_lon') and helper.get('lat') and helper.get('lon'):
+                dist_km = haversine(report['resolved_lat'], report['resolved_lon'], helper.get('lat'), helper.get('lon'))
+                eta_display = get_eta_approx_km_to_minutes(dist_km)
+        except Exception:
+            eta_display = "unknown"
     body = (
         "Hello {},\n\n"
         "A nearby emergency has been reported.\n\n"
         "Message: {}\n"
         "Urgency: {}\n"
         "Location: {}\n"
-        "Map: {}\n\n"
+        "Map: {}\n"
+        "Estimated arrival time: {}\n\n"
         "If you can help, please reply to this email or follow local procedures.\n\n"
         "-- CitizenSOS"
-    ).format(helper.get('name') or "Volunteer", report.get('message') or "", report.get('urgency'), report.get('location_text') or 'not available', maps_link)
+    ).format(helper.get('name') or "Volunteer", report.get('message') or "", report.get('urgency'), report.get('location_text') or 'not available', maps_link, eta_display)
     try:
         res = send_email(to_email=helper.get('email'), subject=subj, body=body)
     except Exception as e:
         res = {"status":"error","detail":str(e)}
     return res
-
 
 # ---------------------------
 # Utility: ensure DB columns exist (non-destructive if already present)
@@ -364,10 +484,50 @@ ensure_reports_column('ml_info', 'TEXT')
 ensure_reports_column('assigned_helpers', 'TEXT')
 
 # ---------------------------
-# Flask routes
+# Fusion helpers (NEW)
+# ---------------------------
+def _gemini_urgency_to_conf(urgency_str):
+    """Map Gemini urgency label to heuristic numeric confidence (0..1)."""
+    if not urgency_str:
+        return 0.5
+    s = str(urgency_str).lower()
+    if "critical" in s:
+        return 0.95
+    if "high" in s:
+        return 0.85
+    if "medium" in s:
+        return 0.6
+    if "low" in s:
+        return 0.35
+    return 0.5
+
+def fuse_with_gemini(local_label, local_prob, keyword_score, gemini_result, weights=None):
+    """
+    Combine local model top prediction (label/prob), keyword_score, and gemini_result.
+    Returns dict: {label, confidence, fused_scores}
+    """
+    if weights is None:
+        weights = {"local": 0.6, "gemini": 0.35, "keyword": 0.05}
+    fused_scores = {}
+    # baseline: local
+    fused_scores[local_label] = weights["local"] * float(local_prob) + weights["keyword"] * float(keyword_score)
+    # gemini contribution
+    if gemini_result:
+        g_label = gemini_result.get("disaster_type", "other")
+        g_conf = _gemini_urgency_to_conf(gemini_result.get("urgency"))
+        fused_scores.setdefault(g_label, 0.0)
+        fused_scores[g_label] += weights["gemini"] * g_conf + weights["keyword"] * float(keyword_score)
+    # normalize
+    total = sum(fused_scores.values()) or 1.0
+    for k in list(fused_scores.keys()):
+        fused_scores[k] = round(float(fused_scores[k]) / total, 4)
+    top_label, top_score = max(fused_scores.items(), key=lambda x: x[1])
+    return {"label": top_label, "confidence": float(top_score), "fused_scores": fused_scores}
+
+# ---------------------------
+# Flask routes (index and go remain the same, with minor enhancements)
 # ---------------------------
 
-# index webpage displays cool visuals and receives user input text for model
 @app.route('/')
 @app.route('/index')
 def index():
@@ -430,7 +590,8 @@ def index():
             'layout': {
                 'title': 'Distribution of Message categories',
                 'yaxis': {'title': "Count"},
-                'xaxis': {'title': "Category"}
+                'xaxis': {'title': "Category"
+                }
             }
         }
     ]
@@ -442,8 +603,6 @@ def index():
     # render web page with plotly graphs
     return render_template('master.html', ids=ids, graphJSON=graphJSON)
 
-
-# web page that handles user query and displays model results
 @app.route('/go')
 def go():
     query = request.args.get('query', '')
@@ -512,17 +671,12 @@ def go():
         classification_result=classification_results
     )
 
-
 # ---------------------------
-# New API endpoints (demo heuristics + alerting)
+# Prediction endpoints (earthquake / flood / tsunami) remain unchanged
 # ---------------------------
 
 @app.route('/predict/earthquake', methods=['POST'])
 def api_predict_quake():
-    """
-    POST JSON:
-    { "lat": <float>, "lon": <float>, "depth": <float>, "date": "YYYY-MM-DD" }
-    """
     payload = request.get_json() or {}
     try:
         lat = float(payload.get('lat', 0.0))
@@ -535,13 +689,8 @@ def api_predict_quake():
     res = predict_quake(lat=lat, lon=lon, date=date, depth=depth)
     return jsonify(res)
 
-
 @app.route('/predict/flood', methods=['POST'])
 def api_predict_flood():
-    """
-    POST JSON:
-    { "rainfall_mm": <float>, "dam_capacity_percent": <float> }
-    """
     payload = request.get_json() or {}
     try:
         rainfall = float(payload.get('rainfall_mm', 0.0))
@@ -552,13 +701,8 @@ def api_predict_flood():
     res = predict_flood(rainfall_mm=rainfall, dam_capacity_percent=dam_capacity)
     return jsonify(res)
 
-
 @app.route('/predict/tsunami', methods=['POST'])
 def api_predict_tsunami():
-    """
-    POST JSON:
-    { "magnitude": <float>, "depth": <float>, "distance_to_coast_km": <float> }
-    """
     payload = request.get_json() or {}
     try:
         magnitude = float(payload.get('magnitude', 0.0))
@@ -570,20 +714,21 @@ def api_predict_tsunami():
     res = predict_tsunami(magnitude=magnitude, depth=depth, distance_to_coast_km=dist)
     return jsonify(res)
 
-
 def _is_valid_latlon(lat, lon):
-    """Return True if lat/lon are valid numeric ranges."""
     try:
         lat = float(lat); lon = float(lon)
     except Exception:
         return False
     return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
 
+# ---------------------------
+# Main create_report endpoint — modified to include Gemini + fusion + ETA
+# ---------------------------
 
 @app.route('/reports', methods=['POST'])
 def create_report():
     """
-    CitizenSOS report endpoint
+    CitizenSOS report endpoint with Gemini fusion and ETA using ORS.
     POST JSON:
     { "message": "...", "lat": <float|null>, "lon": <float|null>, "user_id": optional }
     """
@@ -601,11 +746,11 @@ def create_report():
         if not _is_valid_latlon(raw_lat, raw_lon):
             return jsonify({"status":"error","detail":"invalid lat/lon ranges"}), 400
 
-    # 1) compute emergency score (heuristic for now)
+    # 1) compute emergency score (heuristic)
     urgency = heuristic_emergency_score(message)
-    is_emergency = 1 if urgency >= 0.5 else 0  # threshold 0.5; tune later
+    is_emergency = 1 if urgency >= 0.5 else 0
 
-    # 2) resolve location
+    # 2) resolve location (same robust strategy)
     resolved_lat = None
     resolved_lon = None
     location_text = None
@@ -619,7 +764,6 @@ def create_report():
             resolved_lat = resolved_lon = None
 
     if resolved_lat is None or resolved_lon is None:
-        # decide whether to bias to India
         message_l = message.lower()
         bias_country = None
         if any(s in message_l for s in [" india", "india,", "kerala", "maharashtra", "tamil nadu", "delhi", "karnataka", "andhra", "telangana", "goa", "punjab", "uttar pradesh", "uttarakhand"]):
@@ -632,7 +776,6 @@ def create_report():
             print(f"[geocode] Place candidates: {candidates}, country_bias={bias_country}")
 
         for c in candidates:
-            # Skip single-word pure question tokens (e.g., "Where")
             tokens = re.findall(r'\w+', c)
             if len(tokens) == 1 and tokens[0].lower() in QUESTION_WORDS:
                 try:
@@ -641,14 +784,12 @@ def create_report():
                     print(f"[geocode] Skipping single-word non-place candidate: {c}")
                 continue
 
-            # 1) try raw candidate with country bias (if available)
             geo = geocode_place_nominatim(c, countrycodes=bias_country)
             if geo:
                 resolved_lat, resolved_lon, display = geo
                 location_text = display
                 break
 
-            # 2) try candidate + ", India" if no bias and candidate is short
             if bias_country is None and len(c.split()) <= 3:
                 geo = geocode_place_nominatim(f"{c}, India", countrycodes="in")
                 if geo:
@@ -656,7 +797,6 @@ def create_report():
                     location_text = display
                     break
 
-        # fallback: geocode whole message (shortened) with India bias if available
         if resolved_lat is None or resolved_lon is None:
             short_msg = message if len(message) <= 120 else message[:120]
             try:
@@ -668,9 +808,7 @@ def create_report():
                 resolved_lat, resolved_lon, display = geo
                 location_text = display
 
-        # --- Additional fallbacks: title tokens + last-word India guesses ---
         if resolved_lat is None or resolved_lon is None:
-            # title-case tokens (Padukkad etc.) BUT filter out short/generic tokens
             title_candidates = re.findall(r'\b[A-Z][a-z]{2,}\b', message)
             seen = set()
             filtered = []
@@ -679,10 +817,8 @@ def create_report():
                 if tl in seen:
                     continue
                 seen.add(tl)
-                # skip generic/common tokens
                 if tl in GENERIC_TOKENS or tl in PLACE_STOPWORDS:
                     continue
-                # skip very short tokens
                 if len(tl) < 3:
                     continue
                 filtered.append(t)
@@ -698,10 +834,9 @@ def create_report():
                     break
 
         if resolved_lat is None or resolved_lon is None:
-            # try last 1-3 words appended with ', India'
             words = re.findall(r'\w+', message)
             n = len(words)
-            for k in range(1, min(4, n+1)):  # 1..3
+            for k in range(1, min(4, n+1)):
                 candidate = " ".join(words[-k:]).strip()
                 if not candidate:
                     continue
@@ -722,19 +857,16 @@ def create_report():
                 print("[geocode] All geocoding fallbacks failed; resolved_lat still None")
 
     # 3) ML predictions + keyword fallback saved to ml_info
-    # Ensure ml_info has all category_names with default 0
     ml_info = {c: 0 for c in category_names}
-
     try:
-        # try to use same cleaning/tokenization as /go
         cleaned = " ".join(tokenize(message))
     except Exception:
         cleaned = clean_text(message)
 
+    # local model inference (robust handling)
     try:
         if model is not None and hasattr(model, "predict_proba"):
             raw = model.predict_proba([cleaned])
-            # try to interpret raw into a list of probabilities
             if isinstance(raw, list):
                 probs = list(raw[0]) if len(raw) and isinstance(raw[0], (list, tuple)) else [float(raw[0])]
             else:
@@ -757,10 +889,8 @@ def create_report():
                 except Exception:
                     ml_info[cname] = int(preds[i]) if isinstance(preds, (list, tuple)) and i < len(preds) else 0
         else:
-            # no model available: keep ml_info zeros (keywords will be applied below)
             pass
     except Exception:
-        # on any model error, fallback to zeros (keywords will still apply)
         ml_info = {c: 0 for c in category_names}
 
     # keyword fallback ensures explicit textual mentions are captured
@@ -773,9 +903,8 @@ def create_report():
                 ml_info[cat] = 1
                 break
 
-    # NEW: ensure at least one category appears so dashboard never shows "No categories"
+    # NEW: at least one category
     if not any(ml_info.values()):
-        # prefer 'related' if present, otherwise pick first category as a fallback
         if "related" in ml_info:
             ml_info["related"] = 1
         else:
@@ -783,31 +912,212 @@ def create_report():
             if first_cat:
                 ml_info[first_cat] = 1
 
-    # If ml_info suggests severe categories, raise emergency flag
+    # if certain categories present, promote emergency flag
     if any(ml_info.get(c) for c in ("medical_help", "request", "aid_related", "fire")):
         is_emergency = 1
 
-    # 3) save report to DB (ensure ml_info and assigned_helpers columns exist)
+    # ---------------------------
+    # NEW: Gemini call and fusion logic
+    # ---------------------------
+    # Determine local top prediction and a local probability estimate (best-effort)
+    local_top_label = "other"
+    local_top_prob = 0.0
+    try:
+        if model is not None:
+            # First try predict_proba robustly
+            if hasattr(model, "predict_proba"):
+                proba = model.predict_proba([cleaned])
+                probs = None
+                # Try array-like (n_samples, n_classes)
+                try:
+                    probs = list(proba[0])
+                except Exception:
+                    # maybe list of arrays (multioutput) - find candidate
+                    if isinstance(proba, (list, tuple)) and len(proba) > 0:
+                        for elt in proba:
+                            try:
+                                cand = list(elt[0]) if hasattr(elt, "__len__") else None
+                                if cand and len(cand) > 1:
+                                    probs = cand
+                                    break
+                            except Exception:
+                                continue
+                classes = getattr(model, "classes_", None)
+                if probs is not None and classes is not None and len(classes) == len(probs):
+                    idx = int(np.argmax(probs))
+                    local_top_label = str(classes[idx])
+                    local_top_prob = float(probs[idx])
+                elif probs is not None:
+                    idx = int(np.argmax(probs))
+                    local_top_label = f"pred_{idx}"
+                    local_top_prob = float(probs[idx])
+                else:
+                    # fallback to predict()
+                    try:
+                        pred = model.predict([cleaned])
+                        local_top_label = str(pred[0]) if isinstance(pred, (list, tuple)) else str(pred)
+                        local_top_prob = 0.75
+                    except Exception:
+                        local_top_label = "other"
+                        local_top_prob = 0.2
+            else:
+                # no predict_proba
+                pred = model.predict([cleaned])
+                local_top_label = str(pred[0]) if isinstance(pred, (list, tuple)) else str(pred)
+                local_top_prob = 0.75
+        else:
+            # no model: use keyword heuristics
+            if "collapse" in kw_text or "collapsed" in kw_text:
+                local_top_label = "buildings"
+                local_top_prob = 0.7
+            else:
+                local_top_label = "other"
+                local_top_prob = 0.2
+    except Exception as e:
+        app.logger.warning(f"Error deriving local_top (robust): {e}")
+        local_top_label = "other"
+        local_top_prob = 0.2
+
+    # call Gemini (may return None)
+    try:
+        gemini_result = gemini_analyze_text(message)
+        if gemini_result is None:
+            app.logger.info("Gemini returned None (unavailable or parsing failed).")
+    except Exception as e:
+        app.logger.warning(f"Gemini call failed: {e}")
+        gemini_result = None
+
+    # compute a scalar keyword_score (simple)
+    keyword_score = 0.0
+    for k, w in keyword_map.items():
+        for token in w:
+            if token in kw_text:
+                keyword_score += 0.02
+    keyword_score = min(1.0, keyword_score)
+
+    # fuse into final label + confidence
+    fused = fuse_with_gemini(local_top_label, local_top_prob, keyword_score, gemini_result)
+    fused_label = fused.get("label", local_top_label)
+    fused_confidence = fused.get("confidence", 0.0)
+
+    # ------------------------------
+    # Build ml_record including people count (from Gemini)
+    # ------------------------------
+    # gemini_result may be None or a dict; safe-extract people
+    people_count = None
+    try:
+        if isinstance(gemini_result, dict):
+            people_val = gemini_result.get("people", None)
+            if isinstance(people_val, (int, float)):
+                people_count = int(people_val)
+            elif isinstance(people_val, str) and people_val.strip().isdigit():
+                people_count = int(people_val.strip())
+            else:
+                people_count = gemini_result.get("people")  # could be None
+    except Exception:
+        people_count = None
+
+    ml_record = {
+        "ml_info": ml_info,
+        "local_top": {"label": local_top_label, "prob": local_top_prob},
+        "gemini": gemini_result,
+        "fused": fused,
+        "people": people_count
+    }
+
+    # thresholds (will be adjusted by people_count below)
+    AUTO_DISPATCH_THRESHOLD = 0.90
+    HUMAN_TRIAGE_THRESHOLD = 0.60
+
+    # escalate if many people affected
+    if ml_record.get("people") is not None:
+        try:
+            ppl = int(ml_record.get("people"))
+        except Exception:
+            ppl = 0
+        if ppl >= 5:
+            AUTO_DISPATCH_THRESHOLD = 0.80
+            HUMAN_TRIAGE_THRESHOLD = 0.45
+        elif ppl >= 2:
+            AUTO_DISPATCH_THRESHOLD = 0.875
+            HUMAN_TRIAGE_THRESHOLD = 0.55
+
+    # Auto-dispatch override: if 3+ people and confidence moderate, escalate to auto_dispatch
+    if ml_record.get("people") is not None:
+        try:
+            ppl_chk = int(ml_record.get("people"))
+        except Exception:
+            ppl_chk = 0
+        if ppl_chk >= 3 and fused_confidence >= 0.65:
+            # immediate override to auto_dispatch
+            action = "auto_dispatch"
+        else:
+            # Safer dispatch decision:
+            if fused_confidence >= AUTO_DISPATCH_THRESHOLD:
+                if fused_label == "other":
+                    # only auto if gemini explicitly says it's an emergency
+                    if gemini_result and isinstance(gemini_result, dict) and gemini_result.get("is_emergency"):
+                        action = "auto_dispatch"
+                    else:
+                        app.logger.info("Auto-dispatch blocked because fused_label='other' and Gemini not confirming.")
+                        action = "human_triage"
+                else:
+                    action = "auto_dispatch"
+            elif fused_confidence >= HUMAN_TRIAGE_THRESHOLD:
+                action = "human_triage"
+            else:
+                action = "clarify"
+    else:
+        # no people info: use normal thresholds
+        if fused_confidence >= AUTO_DISPATCH_THRESHOLD:
+            if fused_label == "other":
+                if gemini_result and isinstance(gemini_result, dict) and gemini_result.get("is_emergency"):
+                    action = "auto_dispatch"
+                else:
+                    app.logger.info("Auto-dispatch blocked because fused_label='other' and Gemini not confirming.")
+                    action = "human_triage"
+            else:
+                action = "auto_dispatch"
+        elif fused_confidence >= HUMAN_TRIAGE_THRESHOLD:
+            action = "human_triage"
+        else:
+            action = "clarify"
+
+    # Persist report to DB (including ml_info + gemini + fused)
     assigned_helpers = []
     created_at = datetime.utcnow().isoformat() + "Z"
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     try:
-        # insert with ml_info and assigned_helpers columns; these were ensured above
         cur.execute("""
             INSERT INTO reports (message, raw_lat, raw_lon, resolved_lat, resolved_lon, location_text, urgency, is_emergency, created_at, ml_info, assigned_helpers)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (message, raw_lat, raw_lon, resolved_lat, resolved_lon, location_text, urgency, is_emergency, created_at, json.dumps(ml_info), json.dumps(assigned_helpers)))
-        report_id = cur.lastrowid
+        """, (message, raw_lat, raw_lon, resolved_lat, resolved_lon, location_text, urgency, is_emergency, created_at, json.dumps(ml_record), json.dumps(assigned_helpers)))
+        report_rowid = cur.lastrowid
         conn.commit()
     except Exception as e:
         conn.close()
         return jsonify({"status":"error","detail":"db insert failed","error":str(e)}), 500
 
-    # 4) if emergency -> find helpers and notify
+    # If emergency -> find helpers and notify (attach ETA info and numeric ORS fields)
     if is_emergency:
         helpers = find_nearby_helpers(resolved_lat, resolved_lon, max_results=5, max_radius_km=15)
         for h in helpers:
+            # compute ETA using ORS (cached) with fallback to haversine rough estimate
+            eta = None
+            eta_info = None
+            try:
+                if resolved_lat is not None and resolved_lon is not None and h.get('lat') is not None and h.get('lon') is not None:
+                    eta_info = get_eta_openrouteservice_cached(resolved_lat, resolved_lon, h['lat'], h['lon'])
+                if eta_info and eta_info.get("duration_text"):
+                    eta = format_duration_text(eta_info.get("duration_text"), duration_s=eta_info.get("duration_s"))
+                else:
+                    dist = haversine(resolved_lat, resolved_lon, h['lat'], h['lon'])
+                    eta = get_eta_approx_km_to_minutes(dist)
+            except Exception:
+                eta = "unknown"
+
+            # notify (email) - pass eta_text so notify_helper_via_email can use it
             res_send = notify_helper_via_email(h, {
                 "message": message,
                 "short_msg": message[:140],
@@ -815,37 +1125,70 @@ def create_report():
                 "resolved_lat": resolved_lat,
                 "resolved_lon": resolved_lon,
                 "location_text": location_text
+            }, eta_text=eta)
+
+            # attach numeric ORS values if present
+            eta_seconds = None
+            eta_distance_km = None
+            try:
+                if eta_info:
+                    eta_seconds = eta_info.get("duration_s")
+                    eta_distance_km = eta_info.get("distance_km")
+                else:
+                    tmp = get_eta_openrouteservice_cached(resolved_lat, resolved_lon, h['lat'], h['lon'])
+                    if tmp:
+                        eta_seconds = tmp.get("duration_s")
+                        eta_distance_km = tmp.get("distance_km")
+            except Exception:
+                eta_seconds = None
+                eta_distance_km = None
+
+            assigned_helpers.append({
+                'helper_id': h['id'],
+                'name': h['name'],
+                'email': h['email'],
+                'dist_km': h['dist_km'],
+                'eta': eta,
+                'eta_seconds': eta_seconds,
+                'eta_distance_km': round(eta_distance_km, 3) if eta_distance_km is not None else None,
+                'send_result': res_send
             })
-            assigned_helpers.append({'helper_id': h['id'], 'name': h['name'], 'email': h['email'], 'dist_km': h['dist_km'], 'send_result': res_send})
         # write assigned helpers to DB
         try:
-            cur.execute("UPDATE reports SET assigned_helpers = ? WHERE id = ?", (json.dumps(assigned_helpers), report_id))
+            cur.execute("UPDATE reports SET assigned_helpers = ? WHERE id = ?", (json.dumps(assigned_helpers), report_rowid))
             conn.commit()
         except Exception:
             pass
 
     conn.close()
 
-    return jsonify({
+    # build response payload (including Gemini/ML info and fused decision)
+    response_payload = {
         "status": "ok",
-        "report_id": report_id,
+        "report_id": report_rowid,
         "is_emergency": is_emergency,
         "urgency": urgency,
         "resolved_lat": resolved_lat,
         "resolved_lon": resolved_lon,
         "location_text": location_text,
         "assigned_helpers": assigned_helpers,
-        "ml_info": ml_info
-    })
+        "ml_info": ml_record,
+        "fused_label": fused_label,
+        "fused_confidence": fused_confidence,
+        "action": action,
+        "people": ml_record.get("people")
+    }
+    # include Gemini summary if present
+    if gemini_result and isinstance(gemini_result, dict):
+        response_payload["summary"] = gemini_result.get("summary")
+        response_payload["urgency_label"] = gemini_result.get("urgency")
+        response_payload["gemini"] = gemini_result
 
+    return jsonify(response_payload)
+
+# alerts endpoints unchanged
 @app.route('/alerts/send', methods=['POST'])
 def api_send_alert():
-    """
-    POST JSON:
-    { "to": "recipient@example.com", "subject": "text", "body": "text" }
-    This handler sends the email (via src.alerts.send_email) and appends an audit
-    record (one JSON object per line) to logs/alerts.log
-    """
     payload = request.get_json() or {}
     to = payload.get('to')
     subject = payload.get('subject', 'Disaster Alert')
@@ -870,7 +1213,6 @@ def api_send_alert():
         with open(ALERT_LOG_PATH, 'a', encoding='utf-8') as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
-        # don't fail the request because of logging; include log error in response
         result = {"status": "error", "detail": f"email send result: {result}; log error: {str(e)}"}
 
     return jsonify(result)
@@ -878,10 +1220,6 @@ def api_send_alert():
 
 @app.route('/alerts/logs', methods=['GET'])
 def api_get_alert_logs():
-    """
-    Return recent alert audit records as JSON array.
-    Query param: n (optional, default 20)
-    """
     try:
         n = int(request.args.get('n', 20))
     except Exception:
@@ -908,14 +1246,9 @@ def api_get_alert_logs():
     records.reverse()
     return jsonify(records)
 
-
-# ---------------------------
-# New helper endpoints added
-# ---------------------------
-
+# other helper endpoints unchanged (recent reports, resolve, assign, export)
 @app.route('/reports/recent', methods=['GET'])
 def api_get_recent_reports():
-    """Return recent reports (for helper/admin dashboard). Query param: n (default 25)."""
     try:
         n = int(request.args.get('n', 25))
     except Exception:
@@ -944,16 +1277,12 @@ def api_get_recent_reports():
         })
     return jsonify(out)
 
-# --- New endpoints: resolve, assign, export CSV ---
-
 @app.route('/report/<int:report_id>/resolve', methods=['POST'])
 def api_resolve_report(report_id):
-    """Mark a report as resolved. Sets 'resolved' flag and resolved_at timestamp."""
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         resolved_at = datetime.utcnow().isoformat() + "Z"
-        # ensure columns exist
         try:
             cur.execute("PRAGMA table_info(reports)")
             cols = [r[1] for r in cur.fetchall()]
@@ -973,10 +1302,6 @@ def api_resolve_report(report_id):
 
 @app.route('/report/<int:report_id>/assign', methods=['POST'])
 def api_assign_helper(report_id):
-    """
-    Manually assign a helper to a report.
-    POST JSON: { helper_id: <int> }
-    """
     payload = request.get_json() or {}
     helper_id = payload.get('helper_id')
     if helper_id is None:
@@ -984,14 +1309,12 @@ def api_assign_helper(report_id):
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        # get helper record
         cur.execute("SELECT id, name, email, lat, lon FROM helpers WHERE id = ?", (helper_id,))
         h = cur.fetchone()
         if not h:
             conn.close()
             return jsonify({"status":"error","detail":"helper not found"}), 404
         hid, name, email, hlat, hlon = h
-        # fetch existing assigned_helpers
         cur.execute("SELECT assigned_helpers FROM reports WHERE id = ?", (report_id,))
         row = cur.fetchone()
         existing = []
@@ -1000,7 +1323,6 @@ def api_assign_helper(report_id):
                 existing = json.loads(row[0])
             except Exception:
                 existing = []
-        # compute distance if report has coords
         cur.execute("SELECT resolved_lat, resolved_lon FROM reports WHERE id = ?", (report_id,))
         rr = cur.fetchone()
         dist_km = None
@@ -1010,7 +1332,37 @@ def api_assign_helper(report_id):
                 dist_km = round(dist_km, 2)
             except Exception:
                 dist_km = None
-        new = {"helper_id": hid, "name": name, "email": email, "dist_km": dist_km}
+
+        # compute ETA for manual assign using ORS cached if possible
+        eta = None
+        eta_seconds = None
+        eta_distance_km = None
+        try:
+            if rr and rr[0] is not None and rr[1] is not None and hlat is not None and hlon is not None:
+                eta_info = get_eta_openrouteservice_cached(rr[0], rr[1], hlat, hlon)
+                if eta_info and eta_info.get("duration_s") is not None:
+                    eta = format_duration_text(duration_s=eta_info.get("duration_s"))
+                    eta_seconds = eta_info.get("duration_s")
+                    eta_distance_km = eta_info.get("distance_km")
+                elif eta_info and eta_info.get("duration_text"):
+                    eta = format_duration_text(eta_info.get("duration_text"))
+                    eta_seconds = eta_info.get("duration_s")
+                    eta_distance_km = eta_info.get("distance_km")
+                else:
+                    if dist_km is not None:
+                        eta = get_eta_approx_km_to_minutes(dist_km)
+        except Exception:
+            eta = None
+
+        new = {
+            "helper_id": hid,
+            "name": name,
+            "email": email,
+            "dist_km": dist_km,
+            "eta": eta,
+            "eta_seconds": eta_seconds,
+            "eta_distance_km": round(eta_distance_km, 3) if eta_distance_km is not None else None
+        }
         existing.append(new)
         cur.execute("UPDATE reports SET assigned_helpers = ? WHERE id = ?", (json.dumps(existing), report_id))
         conn.commit()
@@ -1019,9 +1371,80 @@ def api_assign_helper(report_id):
     except Exception as e:
         return jsonify({"status":"error","detail":str(e)}), 500
 
+# Add this to run.py (near other report endpoints)
+@app.route('/report/<int:report_id>/recompute_eta', methods=['POST'])
+def api_recompute_eta(report_id):
+    """
+    Recompute ORS ETA for assigned helpers of the given report.
+    Returns updated assigned_helpers list (with eta, eta_seconds, eta_distance_km).
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT resolved_lat, resolved_lon, assigned_helpers FROM reports WHERE id = ?", (report_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"status":"error","detail":"report not found"}), 404
+        resolved_lat, resolved_lon, assigned_json = row
+        if resolved_lat is None or resolved_lon is None:
+            conn.close()
+            return jsonify({"status":"error","detail":"report has no resolved coordinates"}), 400
+
+        assigned = []
+        if assigned_json:
+            try:
+                assigned = json.loads(assigned_json)
+            except Exception:
+                assigned = []
+
+        updated = []
+        for h in assigned:
+            hlat = h.get('lat') or h.get('lat')  # depends on your stored helper structure
+            hlon = h.get('lon') or h.get('lon')
+            # If not present in stored helper dict, fetch helper row
+            if hlat is None or hlon is None:
+                try:
+                    cur.execute("SELECT lat, lon FROM helpers WHERE id = ?", (h.get('helper_id'),))
+                    hr = cur.fetchone()
+                    if hr:
+                        hlat, hlon = float(hr[0]), float(hr[1])
+                except Exception:
+                    hlat = hlon = None
+
+            eta_text = h.get('eta')
+            eta_seconds = None
+            eta_distance_km = None
+            if hlat is not None and hlon is not None:
+                # Force fresh ORS call (bypass cache)
+                fresh = get_eta_openrouteservice(resolved_lat, resolved_lon, hlat, hlon)
+                if fresh:
+                    eta_seconds = fresh.get("duration_s")
+                    eta_distance_km = fresh.get("distance_km")
+                    try:
+                        eta_text = format_duration_text(duration_s=eta_seconds)
+                    except Exception:
+                        eta_text = fresh.get("duration_text") or eta_text
+
+            h['eta'] = eta_text
+            h['eta_seconds'] = eta_seconds
+            h['eta_distance_km'] = round(eta_distance_km,3) if eta_distance_km is not None else None
+            updated.append(h)
+
+        # persist updated assigned_helpers back to DB
+        try:
+            cur.execute("UPDATE reports SET assigned_helpers = ? WHERE id = ?", (json.dumps(updated), report_id))
+            conn.commit()
+        except Exception:
+            app.logger.warning("Could not persist recomputed assigned_helpers for report %s", report_id)
+        conn.close()
+        return jsonify({"status":"ok","assigned_helpers": updated})
+    except Exception as e:
+        app.logger.exception("recompute_eta error")
+        return jsonify({"status":"error","detail":str(e)}), 500
+
 @app.route('/reports/export', methods=['GET'])
 def api_export_reports_csv():
-    """Export recent reports as CSV. Query param n (default 200)."""
     try:
         n = int(request.args.get('n', 200))
     except Exception:
@@ -1034,7 +1457,6 @@ def api_export_reports_csv():
         conn.close()
     except Exception:
         rows = []
-    # build CSV
     import io, csv
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -1042,19 +1464,11 @@ def api_export_reports_csv():
     for r in rows:
         writer.writerow([r[0], r[1] or '', r[4] or '', r[2] or '', r[3] or '', r[5] or '', r[6] or 0, r[7] or '', r[8] or '', r[9] or ''])
     csv_str = buf.getvalue()
-    # return as text/csv response
     from flask import Response
     return Response(csv_str, mimetype='text/csv', headers={"Content-disposition":"attachment; filename=reports_export.csv"})
 
-# ---------------------------
-
 @app.route('/dashboard')
 def dashboard():
-    """
-    Volunteer/Admin dashboard to view recent reports.
-    Builds a 'predicted_categories' list for each report before rendering so the template
-    doesn't need to use Jinja extensions.
-    """
     import sqlite3, os, json
     db_path = os.path.join(os.path.dirname(__file__), "..", "data", "DisasterResponse.db")
     db_path = os.path.abspath(db_path)
@@ -1069,7 +1483,6 @@ def dashboard():
     rows = cur.fetchall()
     conn.close()
 
-    # process assigned_helpers JSON and ml_info
     reports = []
     for r in rows:
         helpers = []
@@ -1083,22 +1496,18 @@ def dashboard():
         except:
             ml_info = {}
 
-        # build a predictable list of predicted categories (human-friendly order)
         preds = []
         try:
-            # keep order consistent using category_names when possible
             if ml_info:
                 for cname in category_names:
                     if ml_info.get(cname):
                         preds.append(cname)
-            # include any keys in ml_info not in category_names
             for cname, val in ml_info.items():
                 if val and cname not in preds:
                     preds.append(cname)
         except Exception:
             preds = []
 
-        # if empty, mark as no data / none predicted
         if not preds:
             preds_display = []
         else:
@@ -1115,17 +1524,14 @@ def dashboard():
             "helpers": helpers,
             "ml_info": ml_info,
             "predicted_categories": preds_display,
-            "created_at": r[9] if len(r) > 9 else "N/A"
+            "created_at": r[9] if len(r) > 9 else "N/A",
+            "assigned_helpers": helpers  # include numeric fields for dashboard
         })
 
     return render_template("dashboard.html", reports=reports)
 
 @app.route('/helpers', methods=['POST'])
 def api_add_helper():
-    """
-    Register a helper/volunteer.
-    POST JSON: { name, email, phone, lat, lon, radius_km (optional, default 10) }
-    """
     p = request.get_json() or {}
     name = p.get('name'); email = p.get('email'); phone = p.get('phone')
     lat = p.get('lat'); lon = p.get('lon'); radius = p.get('radius_km', 10)
@@ -1144,22 +1550,155 @@ def api_add_helper():
     conn.close()
     return jsonify({"status":"ok","helper_id": hid})
 
-
-# ---------------------------
-# Small citizen-facing page (simple report form)
-# ---------------------------
 @app.route('/report')
 def report_page():
-    """
-    Render citizen-facing report form, optionally prefilled with ?prefill=<msg>.
-    """
     prefill = request.args.get("prefill", "")
     return render_template('report.html', prefill=prefill)
-
 
 def main():
     app.run(host='0.0.0.0', port=3001, debug=True)
 
-
+import endpoints
 if __name__ == '__main__':
     main()
+
+# --- Added endpoints for frontend preview and live ETA polling ---
+import time, json, sqlite3, math
+
+def _haversine(lat1, lon1, lat2, lon2):
+    if None in (lat1,lon1,lat2,lon2):
+        return float('inf')
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    return 2 * R * math.asin(math.sqrt(a))
+
+_ETA_CACHE = {}
+_ETA_CACHE_TTL = 60
+def _cache_key_for_eta(o_lat, o_lon, d_lat, d_lon, mode='driving'):
+    return f"{float(o_lat):.6f},{float(o_lon):.6f}->{float(d_lat):.6f},{float(d_lon):.6f}|{mode}"
+
+def _get_eta_cached(o_lat, o_lon, d_lat, d_lon):
+    key = _cache_key_for_eta(o_lat,o_lon,d_lat,d_lon)
+    now = time.time()
+    if key in _ETA_CACHE:
+        ts, val = _ETA_CACHE[key]
+        if now - ts < _ETA_CACHE_TTL:
+            return val
+    # Try to use existing get_eta_openrouteservice if available
+    try:
+        val = get_eta_openrouteservice(o_lat, o_lon, d_lat, d_lon)
+    except Exception:
+        val = None
+    _ETA_CACHE[key] = (now, val)
+    return val
+
+def _format_duration_text(duration_s=None, duration_text=None):
+    try:
+        if duration_s is not None:
+            if duration_s < 60:
+                return "<1 min"
+            mins = int(round(duration_s/60.0))
+            return f"{mins} min" if mins == 1 else f"{mins} mins"
+        if duration_text:
+            return duration_text
+    except Exception:
+        pass
+    return "unknown"
+
+@app.route('/find_nearby', methods=['POST'])
+def api_find_nearby():
+    payload = request.get_json() or {}
+    try:
+        lat = float(payload.get('lat'))
+        lon = float(payload.get('lon'))
+    except Exception:
+        return jsonify({"status":"error","detail":"lat and lon required numeric"}), 400
+    max_radius_km = float(payload.get('max_radius_km', 15))
+    max_results = int(payload.get('max_results', 6))
+    try:
+        conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+        cur.execute("SELECT id, name, email, phone, lat, lon, radius_km FROM helpers WHERE active=1")
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        rows = []
+    helpers = []
+    for r in rows:
+        try:
+            hid, name, email, phone, hlat, hlon, hradius = r
+        except Exception:
+            continue
+        if hlat is None or hlon is None:
+            continue
+        dist = _haversine(lat, lon, hlat, hlon)
+        allowed = hradius if (hradius and hradius>0) else max_radius_km
+        if dist <= allowed:
+            eta_info = _get_eta_cached(lat, lon, hlat, hlon)
+            eta_text = None; eta_seconds = None
+            if eta_info:
+                eta_seconds = eta_info.get("duration_s"); eta_text = _format_duration_text(duration_s=eta_seconds, duration_text=eta_info.get("duration_text"))
+            else:
+                mins = max(1, int(round((dist / 35.0) * 60)))
+                eta_text = f"{mins} mins"
+            helpers.append({
+                "helper_id": hid, "name": name, "email": email, "phone": phone,
+                "lat": hlat, "lon": hlon, "dist_km": round(dist,2),
+                "eta_text": eta_text, "eta_seconds": eta_seconds
+            })
+    helpers = sorted(helpers, key=lambda x: x.get('dist_km') or 999)[:max_results]
+    return jsonify({"status":"ok","helpers":helpers})
+
+@app.route('/eta_status/<int:report_id>', methods=['GET'])
+def api_eta_status(report_id):
+    bypass_cache = request.args.get('bypass_cache','false').lower() in ('1','true','yes')
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    try:
+        cur.execute("SELECT assigned_helpers, resolved_lat, resolved_lon FROM reports WHERE id = ?", (report_id,))
+        row = cur.fetchone()
+    except Exception:
+        row = None
+    conn.close()
+    if not row:
+        return jsonify({"status":"error","detail":"report not found"}), 404
+    assigned_json, resolved_lat, resolved_lon = row
+    assigned = []
+    if assigned_json:
+        try: assigned = json.loads(assigned_json)
+        except Exception: assigned = []
+    updated = []
+    for h in assigned:
+        hlat = h.get('lat'); hlon = h.get('lon')
+        if (hlat is None or hlon is None) and h.get('helper_id'):
+            try:
+                conn2 = sqlite3.connect(DB_PATH); cur2 = conn2.cursor()
+                cur2.execute("SELECT lat, lon FROM helpers WHERE id = ?", (h.get('helper_id'),))
+                hr = cur2.fetchone(); conn2.close()
+                if hr: hlat, hlon = float(hr[0]), float(hr[1])
+            except Exception:
+                hlat = hlon = None
+        eta_text = h.get('eta'); eta_seconds = h.get('eta_seconds')
+        if resolved_lat is not None and resolved_lon is not None and hlat is not None and hlon is not None:
+            try:
+                eta_info = _get_eta_cached(resolved_lat, resolved_lon, hlat, hlon)
+                if eta_info:
+                    eta_seconds = eta_info.get("duration_s")
+                    eta_text = _format_duration_text(duration_s=eta_seconds, duration_text=eta_info.get("duration_text"))
+                else:
+                    dist = _haversine(resolved_lat, resolved_lon, hlat, hlon)
+                    mins = max(1, int(round((dist / 35.0) * 60)))
+                    eta_text = f"{mins} mins"
+            except Exception:
+                pass
+        h['eta'] = eta_text; h['eta_seconds'] = eta_seconds
+        updated.append(h)
+    try:
+        conn3 = sqlite3.connect(DB_PATH); cur3 = conn3.cursor()
+        cur3.execute("UPDATE reports SET assigned_helpers = ? WHERE id = ?", (json.dumps(updated), report_id))
+        conn3.commit(); conn3.close()
+    except Exception:
+        pass
+    return jsonify({"status":"ok","report_id": report_id, "assigned_helpers": updated})
+# --- end added endpoints ---

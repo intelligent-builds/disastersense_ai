@@ -1,0 +1,139 @@
+# app/endpoints.py
+# Registers lightweight endpoints used by the frontend:
+#  - POST /find_nearby
+#  - GET  /eta_status/<report_id>
+
+import time, json, sqlite3, math
+from flask import jsonify, request
+# import the Flask app and helper functions from run (app must already be created when run.py imports this)
+from run import app, DB_PATH, get_eta_openrouteservice, haversine as _haversine  # use existing helpers if present
+
+# local ETA cache
+_ETA_CACHE = {}
+_ETA_CACHE_TTL = 60
+def _cache_key_for_eta(o_lat, o_lon, d_lat, d_lon, mode='driving'):
+    return f"{float(o_lat):.6f},{float(o_lon):.6f}->{float(d_lat):.6f},{float(d_lon):.6f}|{mode}"
+
+def _get_eta_cached(o_lat, o_lon, d_lat, d_lon):
+    key = _cache_key_for_eta(o_lat,o_lon,d_lat,d_lon)
+    now = time.time()
+    if key in _ETA_CACHE:
+        ts, val = _ETA_CACHE[key]
+        if now - ts < _ETA_CACHE_TTL:
+            return val
+    try:
+        val = None
+        if 'get_eta_openrouteservice' in globals() and callable(get_eta_openrouteservice):
+            val = get_eta_openrouteservice(o_lat, o_lon, d_lat, d_lon)
+    except Exception:
+        val = None
+    _ETA_CACHE[key] = (now, val)
+    return val
+
+def _format_duration_text(duration_s=None, duration_text=None):
+    try:
+        if duration_s is not None:
+            if duration_s < 60:
+                return "<1 min"
+            mins = int(round(duration_s/60.0))
+            return f"{mins} min" if mins == 1 else f"{mins} mins"
+        if duration_text:
+            return duration_text
+    except Exception:
+        pass
+    return "unknown"
+
+@app.route('/find_nearby', methods=['POST'])
+def api_find_nearby():
+    payload = request.get_json() or {}
+    try:
+        lat = float(payload.get('lat'))
+        lon = float(payload.get('lon'))
+    except Exception:
+        return jsonify({"status":"error","detail":"lat and lon required numeric"}), 400
+    max_radius_km = float(payload.get('max_radius_km', 15))
+    max_results = int(payload.get('max_results', 6))
+    try:
+        conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+        cur.execute("SELECT id, name, email, phone, lat, lon, radius_km FROM helpers WHERE active=1")
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        rows = []
+    helpers = []
+    for r in rows:
+        try:
+            hid, name, email, phone, hlat, hlon, hradius = r
+        except Exception:
+            continue
+        if hlat is None or hlon is None:
+            continue
+        dist = _haversine(lat, lon, hlat, hlon)
+        allowed = hradius if (hradius and hradius>0) else max_radius_km
+        if dist <= allowed:
+            eta_info = _get_eta_cached(lat, lon, hlat, hlon)
+            eta_text = None; eta_seconds = None
+            if eta_info:
+                eta_seconds = eta_info.get("duration_s"); eta_text = _format_duration_text(duration_s=eta_seconds, duration_text=eta_info.get("duration_text"))
+            else:
+                mins = max(1, int(round((dist / 35.0) * 60)))
+                eta_text = f"{mins} mins"
+            helpers.append({
+                "helper_id": hid, "name": name, "email": email, "phone": phone,
+                "lat": hlat, "lon": hlon, "dist_km": round(dist,2),
+                "eta_text": eta_text, "eta_seconds": eta_seconds
+            })
+    helpers = sorted(helpers, key=lambda x: x.get('dist_km') or 999)[:max_results]
+    return jsonify({"status":"ok","helpers":helpers})
+
+@app.route('/eta_status/<int:report_id>', methods=['GET'])
+def api_eta_status(report_id):
+    bypass_cache = request.args.get('bypass_cache','false').lower() in ('1','true','yes')
+    try:
+        conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+        cur.execute("SELECT assigned_helpers, resolved_lat, resolved_lon FROM reports WHERE id = ?", (report_id,))
+        row = cur.fetchone(); conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return jsonify({"status":"error","detail":"report not found"}), 404
+    assigned_json, resolved_lat, resolved_lon = row
+    assigned = []
+    if assigned_json:
+        try:
+            assigned = json.loads(assigned_json)
+        except Exception:
+            assigned = []
+    updated = []
+    for h in assigned:
+        hlat = h.get('lat'); hlon = h.get('lon')
+        if (hlat is None or hlon is None) and h.get('helper_id'):
+            try:
+                conn2 = sqlite3.connect(DB_PATH); cur2 = conn2.cursor()
+                cur2.execute("SELECT lat, lon FROM helpers WHERE id = ?", (h.get('helper_id'),))
+                hr = cur2.fetchone(); conn2.close()
+                if hr: hlat, hlon = float(hr[0]), float(hr[1])
+            except Exception:
+                hlat = hlon = None
+        eta_text = h.get('eta'); eta_seconds = h.get('eta_seconds')
+        if resolved_lat is not None and resolved_lon is not None and hlat is not None and hlon is not None:
+            try:
+                eta_info = _get_eta_cached(resolved_lat, resolved_lon, hlat, hlon)
+                if eta_info:
+                    eta_seconds = eta_info.get("duration_s")
+                    eta_text = _format_duration_text(duration_s=eta_seconds, duration_text=eta_info.get("duration_text"))
+                else:
+                    dist = _haversine(resolved_lat, resolved_lon, hlat, hlon)
+                    mins = max(1, int(round((dist / 35.0) * 60)))
+                    eta_text = f"{mins} mins"
+            except Exception:
+                pass
+        h['eta'] = eta_text; h['eta_seconds'] = eta_seconds
+        updated.append(h)
+    try:
+        conn3 = sqlite3.connect(DB_PATH); cur3 = conn3.cursor()
+        cur3.execute("UPDATE reports SET assigned_helpers = ? WHERE id = ?", (json.dumps(updated), report_id))
+        conn3.commit(); conn3.close()
+    except Exception:
+        pass
+    return jsonify({"status":"ok","report_id": report_id, "assigned_helpers": updated})
