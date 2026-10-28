@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Report Emergency — Live Rescue Tracking</title>
+  <title>DisasterSense AI — Emergency Reporting</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
@@ -70,15 +70,47 @@
 
     /* pretty card headings */
     .section-title{ font-weight:700; margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+  
+    /* DisasterSense AI — Tiffany blue + white theme */
+    :root {
+      --bg: #f0fbfa;
+      --card: #ffffff;
+      --muted: #587574;
+      --accent: #d94848;
+      --accent-2: #0abab5;
+      --success: #149b83;
+      --radius: 16px;
+      --glass: rgba(255,255,255,.82);
+    }
+    body { color: #183b3a; }
+    .container { max-width: 1160px; }
+    .card { border: 1px solid #dff2f0; box-shadow: 0 10px 28px rgba(20,90,89,.07); }
+    .logo { background: linear-gradient(135deg, #e8faf9, #fff); color: #087f7b; border: 1px solid #ccebe8; }
+    .btn.primary { background: #0abab5; }
+    .btn.ghost { border-color: #ccebe8; color: #245654; }
+    textarea#message, input { border-color: #ccebe8 !important; background: #fbfffe; }
+    textarea#message:focus, input:focus { outline: 3px solid rgba(10,186,181,.15); border-color: #0abab5 !important; }
+    .helper { background: #f5fcfb; border-color: #d8f1ef; }
+    .live-card .card { border-top: 4px solid #0abab5; }
+    #mini-map { border: 1px solid #d8f1ef; }
+    .phone-link { color: #078e89; }
+    @media (max-width: 640px) {
+      .container { margin: 8px auto; padding: 10px; }
+      header.appbar { align-items: flex-start; flex-direction: column; }
+      .form-row { flex-direction: column; }
+      .controls .btn { min-height: 42px; }
+    }
+
   </style>
+<style>:root{--bg:#edf2f0;--card:#fbfaf6;--muted:#607681;--accent:#21c7c2;--ink:#122d3a}body{background:linear-gradient(180deg,#10202c 0,#152a38 220px,#edf2f0 220px);color:var(--ink);font-family:"Segoe UI",Arial,sans-serif}header,.header,.topbar{background:#101e2a!important;color:#f7faf9!important;border-bottom:1px solid #29414e!important}.card,.panel,.map-panel,.info-card,.tracking-card,.report-card{background:#fbfaf6!important;border:1px solid #dce7e7!important;border-radius:12px!important;box-shadow:0 8px 22px rgba(15,36,47,.08)!important}button,.btn{border-radius:7px}input,textarea,select{border:1px solid #cbdcdd!important;border-radius:7px!important}</style>
 </head>
 <body>
   <div class="container">
     <header class="appbar card">
       <div class="brand">
-        <div class="logo">DR</div>
+        <div class="logo">DS</div>
         <div>
-          <h1>Disaster Response Portal</h1>
+          <h1>DisasterSense AI</h1>
           <div class="tagline small">Report an emergency — get help fast. Live ETA & rescuer info shown here.</div>
         </div>
       </div>

@@ -3,56 +3,185 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Disaster Dashboard — Live Map & ETA</title>
+  <title>DisasterSense AI — Live Response Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    :root{
-      --bg:#f4f7fb; --card:#ffffff; --muted:#666; --accent:#2b8af7; --danger:#dc3545;
-      --radius:10px;
+    :root{--bg:#101e2a;--card:#172b38;--muted:#a9bdc9;--accent:#21c7c2;--danger:#d95c62;--ivory:#fbfaf6;--line:#29414f;--radius:12px;}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--ivory);line-height:1.5}
+    .wrap{max-width:1440px;margin:0 auto;padding:24px} header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+    h1{margin:0;font-size:24px;letter-spacing:-.4px}.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.btn{background:#203744;color:var(--ivory);border:1px solid var(--line);padding:9px 12px;border-radius:8px;cursor:pointer}.btn.primary{background:var(--accent);color:#08232b;border:0;font-weight:700}.filters{display:flex;gap:8px;align-items:center}.layout{display:grid;grid-template-columns:420px 1fr;gap:18px;margin-top:18px}.panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:0 12px 30px rgba(0,0,0,.12)}#map{width:100%;height:520px;border-radius:8px}.reports-list{max-height:520px;overflow:auto;padding-right:6px}.report-item{border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid var(--line);background:#1c3341;transition:box-shadow .18s,border-color .18s}.report-item:hover{box-shadow:0 8px 24px rgba(0,0,0,.18);border-color:#3c6b78}.report-item.urgent{background:#382a31;border-color:#82474e}.meta{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin-top:8px}.helpers{margin-top:10px;font-size:13px;color:var(--ivory)}.helper-row{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px dashed var(--line);align-items:center}.eta{font-weight:700;color:var(--ivory)}.small{font-size:12px;color:var(--muted)}.link{color:var(--accent);text-decoration:underline;cursor:pointer;font-size:13px}.legend{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}.legend .litem{display:flex;align-items:center;gap:6px;font-size:13px}.dot{width:12px;height:12px;border-radius:50%;display:inline-block;border:1px solid rgba(255,255,255,.2)}
+    .live-shell{margin-top:18px}.live-head{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.live-head h2{margin:0;font-size:21px}.live-status{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #285c61;background:#15383e;color:#5ce4d7;border-radius:99px;font-size:12px;font-weight:700}.live-dot{width:8px;height:8px;border-radius:50%;background:#39d6a5;box-shadow:0 0 0 4px #1d4b4b}.live-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:14px}.live-map-panel{min-height:430px}.live-map-panel #liveMap{height:350px;border-radius:9px;overflow:hidden;background:#0d1821}.live-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}.live-metric{background:#1c3341;border:1px solid var(--line);border-radius:10px;padding:12px}.live-metric span{display:block;color:var(--muted);font-size:12px}.live-metric strong{font-size:22px;display:block;margin-top:4px}.live-chart{height:220px;position:relative}.live-chart canvas{width:100%!important;height:100%!important}.source-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.source-pill{font-size:11px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;color:#c8d8df}.live-error{color:#ffc5c5;font-size:13px}.live-note{color:var(--muted);font-size:12px;margin-top:10px}.live-loading{color:#79e4dc;font-size:13px}.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#172b38;color:#fbfaf6}.leaflet-control-attribution{font-size:10px!important}
+    @media(max-width:980px){.layout,.live-grid{grid-template-columns:1fr}.wrap{padding:14px}.live-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#map{height:360px}.reports-list{max-height:360px}} @media(max-width:520px){.live-metrics{grid-template-columns:1fr 1fr}.live-head h2{font-size:18px}.wrap{padding:10px}header{align-items:flex-start;flex-direction:column}}
+  
+    /* DisasterSense AI — Tiffany blue + white theme */
+    :root {
+      --bg: #f0fbfa;
+      --card: #ffffff;
+      --muted: #587574;
+      --accent: #0abab5;
+      --danger: #dc3545;
+      --radius: 14px;
     }
-    body { margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; background:var(--bg); color:#222; }
-    .wrap { max-width:1200px; margin:20px auto; padding:18px; }
-    header { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:12px; }
-    h1 { margin:0; font-size:20px; }
-    .controls { display:flex; gap:10px; align-items:center; }
-    .btn { background:#fff; border:1px solid #eaeef5; padding:8px 10px; border-radius:8px; cursor:pointer; }
-    .btn.primary { background:var(--accent); color:#fff; border:0; }
-    .filters { display:flex; gap:8px; align-items:center; }
-
-    .layout { display:grid; grid-template-columns: 420px 1fr; gap:18px; margin-top:12px; }
-    .panel { background:var(--card); border-radius:var(--radius); padding:12px; box-shadow:0 6px 18px rgba(20,30,50,0.04); }
-    #map { width:100%; height:520px; border-radius:8px; }
-    .reports-list { max-height:520px; overflow:auto; padding-right:6px; }
-    .report-item { border-radius:8px; padding:12px; margin-bottom:12px; border:1px solid #f0f4fb; background:#fff; transition:box-shadow .18s; }
-    .report-item:hover { box-shadow:0 8px 24px rgba(15,30,40,0.06); }
-    .report-item.urgent { background:#fff6f6; border-color:#fde2e2; }
-    .meta { display:flex; gap:8px; align-items:center; font-size:13px; color:var(--muted); margin-top:8px; }
-    .helpers { margin-top:10px; font-size:13px; color:#333; }
-    .helper-row { display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-top:1px dashed #f2f6fb; align-items:center; }
-    .eta { font-weight:700; color:#111; }
-    .small { font-size:12px; color:var(--muted); }
-    .link { color:var(--accent); text-decoration:underline; cursor:pointer; font-size:13px; }
-
-    /* legend */
-    .legend { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-    .legend .litem { display:flex; align-items:center; gap:6px; font-size:13px; }
-    .dot { width:12px;height:12px;border-radius:50%;display:inline-block;border:1px solid rgba(0,0,0,0.06); }
-
-    /* responsive */
-    @media (max-width:980px) {
-      .layout { grid-template-columns: 1fr; }
-      #map { height:360px; }
-      .reports-list { max-height:360px; }
+    body { color: #183b3a; }
+    .panel, .report-item { border-color: #d8f1ef; }
+    .btn { border-color: #ccebe8; color: #245654; transition: transform .15s ease, box-shadow .15s ease; }
+    .btn:hover { box-shadow: 0 5px 16px rgba(10,186,181,.16); transform: translateY(-1px); }
+    .btn.primary { background: #0abab5; color: #fff; }
+    .link { color: #078e89; }
+    .report-item.urgent { background: #fff7f7; border-color: #f7d8d8; }
+    #map { border: 1px solid #d8f1ef; }
+    @media (max-width: 640px) {
+      .wrap { margin: 8px auto; padding: 12px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .controls { flex-wrap: wrap; }
+      .controls .btn { min-height: 40px; }
     }
+
   </style>
+<style>:root{--bg:#edf2f0;--card:#fbfaf6;--muted:#607681;--accent:#21c7c2;--ink:#122d3a}body{background:linear-gradient(180deg,#10202c 0,#152a38 220px,#edf2f0 220px);color:var(--ink);font-family:"Segoe UI",Arial,sans-serif}header,.header,.topbar{background:#101e2a!important;color:#f7faf9!important;border-bottom:1px solid #29414e!important}.card,.panel,.map-panel,.info-card,.tracking-card,.report-card{background:#fbfaf6!important;border:1px solid #dce7e7!important;border-radius:12px!important;box-shadow:0 8px 22px rgba(15,36,47,.08)!important}button,.btn{border-radius:7px}input,textarea,select{border:1px solid #cbdcdd!important;border-radius:7px!important}</style>
+<style>
+
+/* ===== Readability/accessibility patch: dashboard contrast ===== */
+:root {
+  --ds-ink: #142b3a;
+  --ds-muted-light: #c0d4e1;
+  --ds-muted-dark: #526779;
+  --ds-light-text: #f8fafc;
+  --ds-card-dark: #1b3543;
+}
+
+/* Top banner: light text on navy */
+header h1 { color: #f8fafc; }
+header .small,
+header .controls label { color: #e0eaf0; }
+header .controls .btn {
+  color: #f8fafc;
+  background: #294654;
+  border: 1px solid #91aab7;
+  font-weight: 600;
+}
+header .controls .btn:hover {
+  background: #365968;
+  color: #ffffff;
+}
+header .controls .btn:disabled {
+  opacity: .7;
+  cursor: not-allowed;
+}
+header .controls .btn:focus-visible,
+.live-shell button:focus-visible,
+.layout button:focus-visible,
+.layout a:focus-visible,
+.layout input:focus-visible {
+  outline: 3px solid #078c91;
+  outline-offset: 3px;
+}
+
+/* The live section heading sits over the dark page banner */
+.live-shell > .live-head h2 { color: #f8fafc; }
+.live-shell > .live-head .small { color: #c0d4e1; }
+
+/* Summary metrics deliberately use dark cards: keep all their text light */
+.live-metric {
+  background: #1b3543;
+  border-color: #365362;
+  color: #f8fafc;
+}
+.live-metric > span,
+.live-metric .small { color: #c0d4e1; }
+.live-metric strong { color: #ffffff; font-weight: 750; }
+
+/* Light panels need dark text, including headings and labels */
+.live-grid .panel,
+.layout > .panel {
+  color: #142b3a;
+}
+.live-grid .panel .live-head,
+.live-grid .panel .live-head strong { color: #142b3a; }
+.live-grid .panel .small,
+.live-grid .panel .live-note { color: #526779; }
+.live-grid .source-pill {
+  color: #334d5c;
+  background: #f2f7f5;
+  border-color: #cbdcdd;
+}
+
+/* Emergency report cards have dark surfaces; don't inherit dark body text */
+.report-item {
+  color: #f8fafc;
+  background: #1b3543;
+  border-color: #365362;
+}
+.report-item strong,
+.report-item > div { color: inherit; }
+.report-item .small,
+.report-item .meta { color: #c0d4e1; }
+.report-item .eta { color: #ffffff; font-weight: 750; }
+.report-item .link { color: #5ee7df; font-weight: 650; }
+.report-item > div[style*="color:#333"] { color: #f8fafc !important; }
+.report-item .helpers { color: #f8fafc; }
+.report-item .helpers .small { color: #c0d4e1; }
+.report-item .btn {
+  background: #294654;
+  color: #ffffff;
+  border: 1px solid #91aab7;
+}
+.report-item .btn:hover {
+  background: #365968;
+  color: #ffffff;
+}
+.report-item.urgent {
+  background: #3a2931;
+  border-color: #a85b65;
+}
+.report-item.urgent .meta,
+.report-item.urgent .small { color: #f1d9dd; }
+
+/* Search field and report list controls */
+.layout input,
+.layout input::placeholder {
+  color: #243f4d;
+}
+.layout input::placeholder { opacity: 1; }
+.layout > .panel > .legend { color: #142b3a; }
+.layout > .panel > div > .btn {
+  color: #ffffff;
+  background: #294654;
+  border: 1px solid #91aab7;
+}
+
+/* Status/error text on light surfaces */
+.live-errors,
+#liveErrors,
+#liveMapNote {
+  color: #526779;
+}
+.live-error { color: #b42332; font-weight: 600; }
+
+/* Keep tables readable on ivory panels */
+#weatherTable { color: #243f4d; }
+#weatherTable th { color: #243f4d; }
+#weatherTable td { color: #334d5c; }
+#weatherTable tbody tr { border-bottom: 1px solid #e1e9e7; }
+
+/* Larger, more legible labels on common displays */
+.live-note { font-size: 13px; line-height: 1.55; }
+.small { line-height: 1.5; }
+@media (max-width: 640px) {
+  .live-metric strong { font-size: 20px; }
+  .live-shell > .live-head { align-items: flex-start; }
+  .report-item { padding: 14px; }
+}
+
+</style>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div>
-        <h1>Disaster Dashboard — Live Map & ETA</h1>
-        <div class="small">Auto-refresh every <span id="refreshSecs">15</span>s · Click a report to focus map</div>
+        <h1>DisasterSense AI <span style="color:#0abab5">|</span> Live Response Dashboard</h1>
+        <div class="small">Emergency reports refresh independently · Live environmental data refreshes every 5 minutes</div>
       </div>
       <div class="controls">
         <div class="filters">
@@ -64,10 +193,28 @@
       </div>
     </header>
 
+    <section class="live-shell" aria-labelledby="liveTitle">
+      <div class="live-head">
+        <div><h2 id="liveTitle">Maharashtra · Live environmental monitoring</h2><div class="small">Observed weather, satellite fire detections and NASA GPM rainfall imagery</div></div>
+        <div><span class="live-status"><span class="live-dot"></span><span id="liveState">CONNECTING TO DATA SOURCES</span></span> <button id="liveRefreshBtn" class="btn primary" type="button">Refresh data</button></div>
+      </div>
+      <div class="live-metrics">
+        <div class="live-metric"><span>Locations reporting weather</span><strong id="weatherCount">—</strong><span id="weatherUpdated" class="small">Waiting for data</span></div>
+        <div class="live-metric"><span>NASA fire hotspots (latest feed)</span><strong id="fireCount">—</strong><span id="fireStatus" class="small">FIRMS key required</span></div>
+        <div class="live-metric"><span>Latest dashboard fetch</span><strong id="lastFetch" style="font-size:16px">—</strong><span class="small">Refresh target: 5 minutes</span></div>
+      </div>
+      <div class="live-grid">
+        <div class="panel live-map-panel"><div class="live-head"><strong>Satellite & observation map</strong><span class="small">Teal: weather stations · Orange: fire detections</span></div><div id="liveMap" aria-label="Maharashtra live environmental map"></div><div class="source-list"><span class="source-pill">NASA GPM IMERG · precipitation layer</span><span class="source-pill">NASA FIRMS · VIIRS fire detections</span><span class="source-pill">OpenStreetMap · base map</span></div><div id="liveMapNote" class="live-note">Loading map layers…</div></div>
+        <div class="panel"><div class="live-head"><strong>Hourly precipitation forecast</strong><span class="small">mm · next 24 hours</span></div><div class="live-chart"><canvas id="rainChart" aria-label="Hourly precipitation forecast chart"></canvas></div><div class="live-note">Forecast, not observed rainfall. Satellite IMERG is shown as a map layer and has its own observation latency.</div><div class="live-head" style="margin-top:22px"><strong>Current conditions by city</strong><span class="small">Open-Meteo</span></div><div id="weatherTable" class="small">Loading weather…</div></div>
+      </div>
+      <div id="liveErrors" class="live-note" role="status" aria-live="polite">Connecting to real data sources. No sample values are shown.</div>
+      <div class="live-note">Sources: <a href="https://firms.modaps.eosdis.nasa.gov/" target="_blank" rel="noopener">NASA FIRMS</a> · <a href="https://gpm.nasa.gov/data/imerg" target="_blank" rel="noopener">NASA GPM IMERG</a> · <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Fire detections indicate satellite-observed thermal anomalies, not confirmed fires.</div>
+    </section>
+
     <div class="layout">
       <div class="panel">
         <div class="legend">
-          <div class="litem"><span class="dot" style="background:#2b8af7"></span> Report</div>
+          <div class="litem"><span class="dot" style="background:#0abab5"></span> Report</div>
           <div class="litem"><span class="dot" style="background:#28a745"></span> Helper</div>
         </div>
 
@@ -89,6 +236,59 @@
 
   <!-- Leaflet -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script>
+  // Live environmental feeds; data is never replaced with fabricated sample values.
+  const LIVE_REFRESH_MS = 5 * 60 * 1000;
+  const liveMap = L.map('liveMap', {zoomControl:true}).setView([19.4,76.2],6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(liveMap);
+  const weatherLayer=L.layerGroup().addTo(liveMap), fireLayer=L.layerGroup().addTo(liveMap);
+  let imergLayer=null, rainChart=null, lastLivePayload=null, liveTimer=null;
+  function esc(v){return String(v==null?'—':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function setLiveState(label){document.getElementById('liveState').textContent=label;}
+  function fmtNum(v,d=1){return (typeof v==='number'&&Number.isFinite(v))?v.toFixed(d):'—';}
+  function renderWeather(cities){
+    weatherLayer.clearLayers();
+    cities.forEach(c=>{const cur=c.current||{};L.circleMarker([c.latitude,c.longitude],{radius:7,color:'#8ff4ed',weight:2,fillColor:'#21c7c2',fillOpacity:.9}).bindPopup(`<b>${esc(c.city)}</b><br>Temperature: ${esc(cur.temperature_2m)} °C<br>Humidity: ${esc(cur.relative_humidity_2m)}%<br>Wind: ${esc(cur.wind_speed_10m)} km/h<br>Provider timestamp: ${esc(cur.time)}<br><small>Open-Meteo</small>`).addTo(weatherLayer);});
+    const rows=cities.map(c=>{const x=c.current||{};return `<tr><td>${esc(c.city)}</td><td>${esc(fmtNum(x.temperature_2m))}°C</td><td>${esc(fmtNum(x.precipitation))} mm</td><td>${esc(fmtNum(x.wind_speed_10m))} km/h</td><td>${esc(x.time||'—')}</td></tr>`;}).join('');
+    document.getElementById('weatherTable').innerHTML=cities.length?`<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:7px 3px;border-bottom:1px solid var(--line)">City</th><th style="text-align:left;padding:7px 3px;border-bottom:1px solid var(--line)">Temp</th><th style="text-align:left;padding:7px 3px;border-bottom:1px solid var(--line)">Rain</th><th style="text-align:left;padding:7px 3px;border-bottom:1px solid var(--line)">Wind</th><th style="text-align:left;padding:7px 3px;border-bottom:1px solid var(--line)">Provider time</th></tr></thead><tbody>${rows}</tbody></table></div>`:'No weather records returned by provider.';
+  }
+  function renderFires(fires){
+    fireLayer.clearLayers();
+    if(fires&&fires.available){(fires.features||[]).forEach(f=>{const marker=L.circleMarker([f.latitude,f.longitude],{radius:5,color:'#ffb454',weight:1,fillColor:'#ff7b28',fillOpacity:.85});marker.bindPopup(`<b>NASA FIRMS hotspot</b><br>Acquired: ${esc(f.acq_date)} ${esc(f.acq_time)} UTC<br>Confidence: ${esc(f.confidence)}<br>FRP: ${esc(f.frp)} MW<br>Satellite: ${esc(f.satellite)}<br><small>Thermal anomaly; not a confirmed fire.</small>`).addTo(fireLayer);});document.getElementById('fireCount').textContent=(fires.count??(fires.features||[]).length).toLocaleString();document.getElementById('fireStatus').textContent='Provider records · acquisition time in popup';}
+    else{document.getElementById('fireCount').textContent='—';document.getElementById('fireStatus').textContent='Not connected';}
+  }
+  function renderRainChart(cities){
+    const series=[];cities.forEach(c=>(c.hourly_forecast||[]).forEach(p=>{if(p.time&&!series.some(s=>s.time===p.time))series.push({time:p.time,values:[]});}));series.sort((a,b)=>a.time.localeCompare(b.time));
+    const labels=series.map(p=>p.time.slice(5,16).replace('T',' '));
+    const datasets=cities.slice(0,5).map((c,idx)=>({label:c.city,data:series.map(p=>{const found=(c.hourly_forecast||[]).find(x=>x.time===p.time);return found&&typeof found.precipitation_mm==='number'?found.precipitation_mm:null;}),borderColor:['#21c7c2','#ffb454','#7fa9ff','#d98fff','#f17b83'][idx],backgroundColor:'transparent',borderWidth:2,tension:.25,pointRadius:0,spanGaps:true}));
+    if(rainChart)rainChart.destroy();
+    const ctx=document.getElementById('rainChart').getContext('2d');
+    rainChart=new Chart(ctx,{type:'line',data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#334155',boxWidth:10,font:{size:11}}}},scales:{x:{ticks:{color:'#526779',maxTicksLimit:6},grid:{color:'rgba(82,103,121,.13)' }},y:{beginAtZero:true,title:{display:true,text:'mm / hour',color:'#526779'},ticks:{color:'#526779'},grid:{color:'rgba(82,103,121,.13)'}}}}});
+  }
+  function updateImerg(rain){
+    if(!rain||!rain.tile_url||!rain.layer){document.getElementById('liveMapNote').textContent='NASA GPM IMERG layer metadata unavailable.';return;}
+    const date=new Date();date.setUTCDate(date.getUTCDate()-1);const dateString=date.toISOString().slice(0,10);
+    if(imergLayer)liveMap.removeLayer(imergLayer);
+    imergLayer=L.tileLayer.wms(rain.tile_url,{layers:rain.layer,format:'image/png',transparent:true,version:'1.1.1',time:dateString,opacity:.62,attribution:'NASA GIBS / GPM IMERG'});
+    imergLayer.on('tileerror',()=>{document.getElementById('liveMapNote').textContent='NASA GPM imagery tiles could not load for the selected date. Weather and fire feeds remain independent.';});
+    imergLayer.addTo(liveMap);
+    document.getElementById('liveMapNote').textContent=`NASA GPM IMERG precipitation-rate overlay · requested date ${dateString} UTC. Layer availability and latency depend on NASA processing.`;
+  }
+  async function refreshLiveData(){
+    const btn=document.getElementById('liveRefreshBtn');btn.disabled=true;btn.textContent='Refreshing…';setLiveState('FETCHING DATA');document.getElementById('liveErrors').textContent='Fetching current provider data…';
+    try{const res=await fetch('/api/live-data',{cache:'no-store'});if(!res.ok)throw new Error(`Live-data endpoint returned HTTP ${res.status}`);const data=await res.json();lastLivePayload=data;const cities=(data.weather&&data.weather.cities)||[];
+      document.getElementById('weatherCount').textContent=cities.length?`${cities.length}/${5}`:'—';document.getElementById('weatherUpdated').textContent=cities.length?'Provider timestamps shown below':'No weather observations returned';document.getElementById('lastFetch').textContent=new Date(data.fetched_at).toLocaleTimeString();
+      renderWeather(cities);renderFires(data.fires);renderRainChart(cities);updateImerg(data.rainfall);
+      const errors=[];if(!cities.length)errors.push('Weather feed unavailable.');if(data.weather&&data.weather.errors&&data.weather.errors.length)errors.push('Weather errors: '+data.weather.errors.join(', ')+'.');if(data.fires&&!data.fires.available)errors.push(data.fires.message||'NASA FIRMS is not connected.');
+      document.getElementById('liveErrors').textContent=errors.length?errors.join(' '):'All configured feeds returned data. Times shown are provider timestamps; the dashboard fetch time is shown separately.';setLiveState(cities.length?'DATA UPDATED':'PARTIAL DATA');
+    }catch(e){console.error(e);setLiveState('DATA UNAVAILABLE');document.getElementById('liveErrors').textContent='Could not load live data: '+e.message+'. Check Flask server connectivity and retry. No placeholder readings are displayed.';}
+    finally{btn.disabled=false;btn.textContent='Refresh data';if(liveTimer)clearTimeout(liveTimer);liveTimer=setTimeout(refreshLiveData,LIVE_REFRESH_MS);}
+  }
+  document.getElementById('liveRefreshBtn').addEventListener('click',refreshLiveData);
+  refreshLiveData();
+  // Existing emergency response map and report polling continue below.
+  </script>
   <script>
   // Dashboard script with map, auto-refresh & helper lines
   const REFRESH_INTERVAL = 15000; // 15s

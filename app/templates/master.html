@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Disaster Response - Home</title>
+  <title>DisasterSense AI — Disaster Intelligence Platform</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" crossorigin="anonymous">
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
-  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 
   <style>
     body { padding-bottom:40px; }
@@ -19,142 +18,540 @@
     .badge-risk.high { background:#e74c3c; }     /* red */
     .card { border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.08); padding:16px; background:#fff; }
     .well { border-radius:8px; }
+  
+    /* DisasterSense AI — Tiffany blue + white theme */
+    :root {
+      --ds-tiffany: #0abab5;
+      --ds-tiffany-dark: #087f7b;
+      --ds-tiffany-pale: #e8faf9;
+      --ds-ink: #183b3a;
+      --ds-muted: #587574;
+    }
+    body { background: #f2fbfa; color: var(--ds-ink); }
+    .navbar-inverse { background: #ffffff; border: 0; border-bottom: 1px solid #d8f1ef; box-shadow: 0 4px 18px rgba(20,90,89,.06); }
+    .navbar-inverse .navbar-brand { color: var(--ds-tiffany-dark); font-weight: 800; letter-spacing: .2px; }
+    .navbar-inverse .navbar-brand:hover { color: var(--ds-tiffany); }
+    .jumbotron { background: linear-gradient(135deg, #e8faf9 0%, #ffffff 75%); color: var(--ds-ink); border-bottom: 1px solid #d8f1ef; }
+    .jumbotron h1 { font-weight: 800; letter-spacing: -.7px; }
+    .jumbotron p { color: var(--ds-muted); }
+    .card { border: 1px solid #d8f1ef; border-radius: 14px; box-shadow: 0 8px 24px rgba(20,90,89,.07); }
+    .btn-success, .btn-primary { background: var(--ds-tiffany); border-color: var(--ds-tiffany); color: #fff; }
+    .btn-success:hover, .btn-primary:hover, .btn-success:focus, .btn-primary:focus { background: var(--ds-tiffany-dark); border-color: var(--ds-tiffany-dark); color: #fff; }
+    .form-control { border-color: #ccebe8; border-radius: 8px; box-shadow: none; }
+    .form-control:focus { border-color: var(--ds-tiffany); box-shadow: 0 0 0 3px rgba(10,186,181,.13); }
+    .demo-section { margin-top: 28px; }
+    .page-header { border-bottom-color: #ccebe8; }
+    .result-json { background: #f5fcfb; border: 1px solid #d8f1ef; border-radius: 10px; color: #245654; }
+    @media (max-width: 767px) {
+      .jumbotron { padding-top: 32px; padding-bottom: 32px; }
+      .jumbotron h1 { font-size: 30px; }
+      .panel-result { display: block; }
+      .panel-result > div { width: 100% !important; }
+    }
+
+
+    /* Dashboard refinement */
+    html { scroll-behavior: smooth; }
+    body { font-family: Inter, "Segoe UI", Arial, sans-serif; }
+    .navbar { min-height: 54px; }
+    .navbar-brand { font-size: 20px; }
+    .jumbotron { padding: 42px 0 38px; }
+    .jumbotron h1 { font-size: clamp(34px, 5vw, 58px); animation: riseIn .65s ease both; }
+    .jumbotron p { font-size: 18px; }
+    .hero-pill { display:inline-block; background:#fff; border:1px solid #ccebe8; border-radius:999px; padding:7px 13px; color:var(--ds-tiffany-dark); font-size:12px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; margin-bottom:10px; }
+    .hero-search { display:flex; gap:10px; align-items:stretch; }
+    .hero-search .form-group { flex:1; width:auto !important; margin:0; }
+    .hero-search input { height:54px; background:#fff; }
+    .hero-search .btn { border-radius:10px; white-space:nowrap; }
+    .dashboard-section { margin:28px 0; }
+    .section-heading { display:flex; justify-content:space-between; align-items:end; gap:14px; margin-bottom:14px; }
+    .section-heading h2,.section-heading h3 { margin:0; font-weight:800; }
+    .section-heading p { margin:5px 0 0; color:var(--ds-muted); }
+    .stat-card { position:relative; overflow:hidden; min-height:122px; margin-bottom:15px; transition:transform .22s ease, box-shadow .22s ease; }
+    .stat-card:hover { transform:translateY(-4px); box-shadow:0 14px 30px rgba(20,90,89,.12); }
+    .stat-label { color:var(--ds-muted); font-size:13px; font-weight:600; }
+    .stat-value { font-size:28px; font-weight:800; margin-top:8px; color:var(--ds-ink); }
+    .stat-icon { position:absolute; right:16px; top:15px; width:38px; height:38px; display:grid; place-items:center; border-radius:12px; background:var(--ds-tiffany-pale); color:var(--ds-tiffany-dark); font-size:19px; }
+    .card-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+    .card-heading h3,.card-heading h4 { margin:0; font-weight:800; }
+    .table-card { overflow:hidden; }
+    .prediction-table { margin:0; }
+    .prediction-table thead { background:#effaf9; color:#245654; }
+    .prediction-table > thead > tr > th { border-bottom:1px solid #d8f1ef; padding:13px 12px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+    .prediction-table > tbody > tr { animation:rowIn .35s ease both; }
+    .prediction-table > tbody > tr > td { padding:13px 12px; vertical-align:middle; border-top-color:#edf6f5; }
+    .empty-row { color:var(--ds-muted); text-align:center; padding:24px !important; }
+    .risk-chip { display:inline-block; border-radius:999px; padding:5px 10px; font-size:11px; font-weight:800; letter-spacing:.04em; }
+    .risk-chip.low { color:#087f57; background:#e4f8ef; }
+    .risk-chip.medium { color:#946200; background:#fff3d2; }
+    .risk-chip.high { color:#b42332; background:#ffeaed; }
+    .chart-card { margin-bottom:16px; min-height:310px; }
+    #graphs > div > div { background:#fff; border:1px solid #d8f1ef; border-radius:14px; box-shadow:0 8px 24px rgba(20,90,89,.06); overflow:hidden; padding:8px; }
+    .btn { border-radius:9px; transition:transform .18s ease, box-shadow .18s ease; }
+    .btn:hover { transform:translateY(-1px); }
+    .card h4 { color:var(--ds-ink); }
+    .section-kicker { color:var(--ds-tiffany-dark); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.1em; }
+    .subtle-note { color:var(--ds-muted); font-size:12px; }
+    @keyframes riseIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes rowIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+    @media (max-width:767px) {
+      .jumbotron { padding:28px 0; }
+      .hero-search { flex-direction:column; }
+      .hero-search .btn { width:100%; }
+      .section-heading { align-items:flex-start; flex-direction:column; }
+      .stat-value { font-size:24px; }
+      .prediction-table { font-size:12px; }
+      .prediction-table > thead > tr > th, .prediction-table > tbody > tr > td { padding:9px 7px; }
+    }
+    
   </style>
+<style>
+
+:root{--ds-tiffany:#21c7c2;--ds-tiffany-dark:#078c91;--ds-tiffany-pale:#e5f7f5;--ds-ink:#122d3a;--ds-muted:#607681;--ds-paper:#fbfaf6;--ds-line:#dce7e7}
+html{background:#101e2a}
+body{background:#edf2f0;color:var(--ds-ink);font-family:"Segoe UI",Arial,sans-serif}
+.navbar-inverse{background:#101e2a;border:0;border-bottom:1px solid rgba(255,255,255,.12);box-shadow:0 8px 22px rgba(3,13,20,.18)}
+.navbar-inverse .navbar-brand{color:#f8fbfa;font-weight:750;letter-spacing:.15px}.navbar-inverse .navbar-brand:hover{color:var(--ds-tiffany)}
+.navbar-inverse .navbar-nav>li>a{color:#c3d2d7}.navbar-inverse .navbar-nav>li>a:hover{color:#fff;background:#203847}
+.jumbotron{background:#152a38;color:#f7faf9;border:0;padding:42px 0 36px;margin-bottom:0;position:relative;z-index:1}.jumbotron h1{color:#f7faf9;font-weight:760;letter-spacing:-.9px}.jumbotron p{color:#b8cbd1}
+.hero-pill{background:#1b3442;color:#6ce2dc;border:1px solid #31515d}
+.card,.well{background:var(--ds-paper);color:var(--ds-ink);border:1px solid var(--ds-line);border-radius:12px;box-shadow:0 8px 22px rgba(15,36,47,.08)}
+.card{padding:18px}.card h3,.card h4,.card h5{color:#163543}.stat-card{border-top:3px solid var(--ds-tiffany)}
+.stat-icon{background:#dff5f2;color:#087f84}.stat-value{color:#122d3a}.section-heading h2,.section-heading h3{color:#142f3c}.section-kicker{color:#078c91}
+.subtle-note,.stat-label{color:#607681}.prediction-table{background:var(--ds-paper)}.prediction-table thead{background:#e8f0ef;color:#365561}
+.prediction-table>thead>tr>th{border-bottom-color:#d6e3e2}.prediction-table>tbody>tr>td{border-top-color:#e8eeeb}.prediction-table>tbody>tr:hover{background:#f0f8f6}
+.result-json{background:#f1f6f4;color:#234752;border:1px solid #d7e6e3;border-radius:9px}
+.form-control{background:#fff;border:1px solid #cbdcdd;color:#193743;border-radius:7px;box-shadow:none}.form-control:focus{border-color:#21b9b7;box-shadow:0 0 0 3px rgba(33,199,194,.14)}
+.btn{border-radius:7px;font-weight:650}.btn-success,.btn-primary{background:#078f91;border-color:#078f91;color:white}
+.btn-success:hover,.btn-primary:hover,.btn-success:focus,.btn-primary:focus{background:#08777d;border-color:#08777d;color:white}
+.btn-default{background:#fff;border-color:#cbd9d9;color:#284653}.btn-default:hover{background:#edf5f3;border-color:#a7c8c6}
+.page-header{border-bottom-color:#d5e3e1}#graphs>div>div{background:var(--ds-paper);border:1px solid var(--ds-line);border-radius:12px;box-shadow:0 8px 22px rgba(15,36,47,.06)}
+.demo-section{margin-top:30px}.demo-section>hr{border-color:#d5e2e0}.badge-risk.low{background:#198568}.badge-risk.medium{background:#d49a20}.badge-risk.high{background:#c94f54}
+@media(max-width:767px){.jumbotron{padding:28px 0 26px}.jumbotron h1{font-size:clamp(32px,9vw,48px);line-height:1.12}.jumbotron p{line-height:1.5;margin-left:auto;margin-right:auto;max-width:680px}.hero-search input{min-width:0}.card{padding:14px}}
+
+
+/* Final layout fixes: prevent hero text from crossing the dark section boundary */
+.jumbotron .container{max-width:1200px}
+.jumbotron .text-center{overflow-wrap:break-word}
+.jumbotron h1{line-height:1.12;margin:18px 0 12px}
+.jumbotron .subtle-note{color:#b8cbd1;line-height:1.55;max-width:900px;margin:12px auto 0;padding:0 12px}
+.hero-search{width:100%}
+.hero-search input{box-sizing:border-box;min-width:0}
+@media(max-width:767px){.hero-search{gap:12px}.jumbotron .subtle-note{font-size:13px}.navbar-fixed-top{position:relative;margin-bottom:0}.jumbotron[style]{margin-top:0!important}}
+</style>
 </head>
+<body>
+
+
 <body>
 
 <nav class="navbar navbar-inverse navbar-fixed-top">
   <div class="container">
-    <div class="navbar-header"><a class="navbar-brand" href="/">Disaster Response</a></div>
+    <div class="navbar-header">
+      <a class="navbar-brand" href="/">DisasterSense AI</a>
+    </div>
   </div>
 </nav>
 
 <div class="jumbotron" style="margin-top:50px;">
   <div class="container">
-    <h1 class="text-center">Disaster Response Project</h1>
-    <p class="text-center">Classify messages • Predict disasters • Send alerts</p>
-
-    <div class="row" style="margin-top:18px">
-      <div class="col-md-10 col-md-offset-1">
-        <form action="/go" method="get" class="form-inline text-center">
-          <div class="form-group" style="width:75%">
-            <input style="width:100%" type="text" class="form-control input-lg" name="query" placeholder="Enter a message to classify — e.g. 'We need water and shelter'">
-          </div>
-          <button class="btn btn-lg btn-success">Classify Message</button>
-        </form>
-      </div>
+    <div class="text-center">
+      <span class="hero-pill">AI-powered emergency intelligence</span>
+      <h1>DisasterSense AI</h1>
+      <p>Understand risk sooner. Respond smarter.</p>
     </div>
+
+    <!-- <div class="row" style="margin-top:24px;">
+      <div class="col-md-10 col-md-offset-1">
+        <form action="/go" method="get" class="hero-search">
+          <div class="form-group">
+            <label class="field-label" for="emergencyQuery">
+              Emergency message to analyze
+            </label>
+            <input
+              id="emergencyQuery"
+              type="text"
+              class="form-control input-lg"
+              name="query"
+              required
+              minlength="3"
+              aria-label="Emergency message to classify"
+              placeholder="Describe the emergency — e.g. Flood water is entering homes and people are trapped"
+            >
+          </div>
+
+          <button class="btn btn-lg btn-success" type="submit">
+            <span class="glyphicon glyphicon-flash"></span>
+            Analyze message
+          </button>
+        </form>
+
+        <p class="text-center subtle-note" style="margin-top:10px;">
+          Use a complete message for a more meaningful classification.
+          Results are decision support, not a substitute for emergency services.
+        </p>
+      </div>
+    </div> -->
   </div>
 </div>
 
 <div class="container">
-  <div class="page-header">
-    <h2 class="text-center">Overview of Training Dataset</h2>
-  </div>
 
-  <div id="graphs" class="row">
-    <div class="col-md-12">
-      {% for id in ids %}
-        <div id="{{id}}" style="margin-bottom:18px;"></div>
-      {% endfor %}
+  <!-- Dashboard overview -->
+  <section class="dashboard-section" aria-label="Dashboard summary">
+    <div class="section-heading">
+      <div>
+        <span class="section-kicker">At a glance</span>
+        <h2>Disaster intelligence overview</h2>
+        <p>Quick access to prediction tools and the latest results from this session.</p>
+      </div>
+
+      <a href="/dashboard" class="btn btn-default">
+        <span class="glyphicon glyphicon-map-marker"></span>
+        Live response dashboard
+      </a>
     </div>
-  </div>
 
+    <div class="row">
+      <div class="col-sm-6 col-md-3">
+        <div class="card stat-card">
+          <span class="stat-icon">◉</span>
+          <div class="stat-label">Prediction checks</div>
+          <div class="stat-value" id="statTotal">0</div>
+          <div class="subtle-note">This browser session</div>
+        </div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="card stat-card">
+          <span class="stat-icon">!</span>
+          <div class="stat-label">High risk results</div>
+          <div class="stat-value" id="statHigh">0</div>
+          <div class="subtle-note">Based on returned model results</div>
+        </div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="card stat-card">
+          <span class="stat-icon">↻</span>
+          <div class="stat-label">Available predictors</div>
+          <div class="stat-value">3</div>
+          <div class="subtle-note">Earthquake · Flood · Tsunami</div>
+        </div>
+      </div>
+
+      <div class="col-sm-6 col-md-3">
+        <div class="card stat-card">
+          <span class="stat-icon">⌁</span>
+          <div class="stat-label">Emergency tools</div>
+          <div class="stat-value">4</div>
+          <div class="subtle-note">Predict · Classify · Map · Alert</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Recent prediction results -->
+  <section class="dashboard-section">
+    <div class="section-heading">
+      <div>
+        <span class="section-kicker">Model output</span>
+        <h2>Recent prediction results</h2>
+        <p>
+          New rows appear when you run a prediction tool.
+          Results are session-only if your existing JavaScript uses session storage.
+        </p>
+      </div>
+
+      <button type="button" class="btn btn-default"
+              id="clearPredictionHistory">
+        Clear history
+      </button>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-responsive">
+        <table class="table prediction-table" id="predictionTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Prediction type</th>
+              <th>Input summary</th>
+              <th>Result</th>
+              <th>Risk</th>
+            </tr>
+          </thead>
+
+          <tbody id="predictionTableBody">
+            <tr>
+              <td colspan="5" class="empty-row">
+                No predictions yet. Run a predictor below to populate this table.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Prediction forms -->
   <div class="demo-section">
     <hr>
     <h3 class="text-center">Disaster Predictions — Demo Controls</h3>
 
-    <div class="row" style="margin-top:20px;">
+    <div class="row prediction-row">
+
+      <!-- Earthquake -->
       <div class="col-md-6">
-        <div class="card">
+        <div class="card prediction-card">
           <form id="quakeForm">
             <h4>Earthquake Prediction</h4>
-            <div class="form-inline">
-              <div class="form-group" style="width:30%"><input class="form-control" name="lat" type="number" step="any" value="9.0" placeholder="Latitude"></div>
-              <div class="form-group" style="width:30%"><input class="form-control" name="lon" type="number" step="any" value="76.9" placeholder="Longitude"></div>
-              <div class="form-group" style="width:30%"><input class="form-control" name="depth" type="number" step="any" value="15" placeholder="Depth (km)"></div>
-              <button class="btn btn-primary" style="margin-left:6px">Predict</button>
+            <p class="form-description">
+              Enter the location and estimated earthquake depth.
+            </p>
+
+            <div class="prediction-fields three-fields">
+              <div class="form-group">
+                <label class="field-label" for="quakeLat">
+                  Latitude (°)
+                </label>
+                <input
+                  id="quakeLat"
+                  class="form-control"
+                  name="lat"
+                  type="number"
+                  min="-90"
+                  max="90"
+                  step="any"
+                  value="9.0"
+                  placeholder="e.g. 9.0"
+                  required
+                >
+                <small class="field-hint">Valid range: −90 to 90</small>
+              </div>
+
+              <div class="form-group">
+                <label class="field-label" for="quakeLon">
+                  Longitude (°)
+                </label>
+                <input
+                  id="quakeLon"
+                  class="form-control"
+                  name="lon"
+                  type="number"
+                  min="-180"
+                  max="180"
+                  step="any"
+                  value="76.9"
+                  placeholder="e.g. 76.9"
+                  required
+                >
+                <small class="field-hint">Valid range: −180 to 180</small>
+              </div>
+
+              <div class="form-group">
+                <label class="field-label" for="quakeDepth">
+                  Earthquake depth (km)
+                </label>
+                <input
+                  id="quakeDepth"
+                  class="form-control"
+                  name="depth"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value="15"
+                  placeholder="e.g. 15"
+                  required
+                >
+              </div>
             </div>
+
+            <button class="btn btn-primary" type="submit">
+              Predict earthquake risk
+            </button>
           </form>
 
-          <div id="quakeCard" class="panel-result" style="margin-top:12px;">
+          <div id="quakeCard" class="panel-result">
             <div>
               <strong>Result:</strong>
-              <div id="quakeBadge" style="margin-top:6px"><span class="badge-risk low">No result yet</span></div>
+              <div id="quakeBadge" class="result-badge">
+                <span class="badge-risk low">No result yet</span>
+              </div>
             </div>
-            <div style="width:55%">
-              <div id="quakeResult" class="result-json">Result will appear here</div>
-            </div>
-          </div>
-        </div>
-      </div> <!-- /col -->
 
-      <div class="col-md-6">
-        <div class="card">
-          <form id="floodForm">
-            <h4>Flood Prediction</h4>
-            <div class="form-inline">
-              <div class="form-group" style="width:45%"><input class="form-control" name="rainfall_mm" type="number" value="120" placeholder="Rainfall (mm)"></div>
-              <div class="form-group" style="width:45%"><input class="form-control" name="dam_capacity_percent" type="number" value="85" placeholder="Dam capacity %"></div>
-              <button class="btn btn-primary" style="margin-left:6px">Predict</button>
-            </div>
-          </form>
-
-          <div id="floodCard" class="panel-result" style="margin-top:12px;">
-            <div>
-              <strong>Flood risk:</strong>
-              <div id="floodBadge" style="margin-top:6px"><span class="badge-risk low">No result yet</span></div>
-            </div>
-            <div style="width:55%">
-              <div id="floodResult" class="result-json">Result will appear here</div>
-            </div>
-          </div>
-        </div>
-      </div> <!-- /col -->
-    </div> <!-- /row -->
-
-    <div class="row" style="margin-top:20px;">
-      <div class="col-md-6">
-        <div class="card">
-          <form id="tsunamiForm">
-            <h4>Tsunami Prediction</h4>
-            <div class="form-inline">
-              <div class="form-group" style="width:30%"><input class="form-control" name="magnitude" type="number" step="any" value="7.1" placeholder="Magnitude"></div>
-              <div class="form-group" style="width:30%"><input class="form-control" name="depth" type="number" step="any" value="30" placeholder="Depth (km)"></div>
-              <div class="form-group" style="width:30%"><input class="form-control" name="distance_to_coast_km" type="number" step="any" value="50" placeholder="Distance (km)"></div>
-              <button class="btn btn-primary" style="margin-left:6px">Predict</button>
-            </div>
-          </form>
-
-          <div id="tsunamiCard" class="panel-result" style="margin-top:12px;">
-            <div>
-              <strong>Tsunami risk:</strong>
-              <div id="tsunamiBadge" style="margin-top:6px"><span class="badge-risk low">No result yet</span></div>
-            </div>
-            <div style="width:55%">
-              <div id="tsunamiResult" class="result-json">Result will appear here</div>
+            <div class="result-column">
+              <div id="quakeResult" class="result-json">
+                Result will appear here.
+              </div>
             </div>
           </div>
         </div>
       </div>
 
+      <!-- Flood -->
       <div class="col-md-6">
-        <div class="card">
-          <h4>Send Quick Alert</h4>
-          <form id="alertForm" class="form-vertical">
-            <div class="form-group"><input class="form-control" name="to" type="email" value="you@example.com" placeholder="To (email)"></div>
-            <div class="form-group"><input class="form-control" name="subject" type="text" value="Test Alert" placeholder="Subject"></div>
-            <div class="form-group"><textarea class="form-control" name="body" rows="3">This is a test.</textarea></div>
-            <div style="display:flex; gap:8px;">
-              <button id="alertSendBtn" class="btn btn-danger">Send</button>
-              <button id="alertRefreshBtn" class="btn btn-default" type="button">Refresh Recent</button>
+        <div class="card prediction-card">
+          <form id="floodForm">
+            <h4>Flood Prediction</h4>
+            <p class="form-description">
+              Enter the rainfall amount and reservoir capacity.
+            </p>
+
+            <div class="prediction-fields two-fields">
+              <div class="form-group">
+                <label class="field-label" for="rainfallMm">
+                  Rainfall (mm)
+                </label>
+                <input
+                  id="rainfallMm"
+                  class="form-control"
+                  name="rainfall_mm"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value="120"
+                  placeholder="e.g. 120"
+                  required
+                >
+                <small class="field-hint">
+                  Use the time period expected by your model.
+                </small>
+              </div>
+
+              <div class="form-group">
+                <label class="field-label" for="damCapacity">
+                  Dam / reservoir capacity (%)
+                </label>
+                <input
+                  id="damCapacity"
+                  class="form-control"
+                  name="dam_capacity_percent"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="any"
+                  value="85"
+                  placeholder="e.g. 85"
+                  required
+                >
+                <small class="field-hint">Enter a percentage from 0 to 100.</small>
+              </div>
             </div>
-            <div style="margin-top:8px"><span id="alertStatus"></span></div>
+
+            <button class="btn btn-primary" type="submit">
+              Predict flood risk
+            </button>
           </form>
 
-          <div style="margin-top:10px;">
-            <h5>Recent Alerts</h5>
-            <div id="alertsList" class="result-json">Loading…</div>
+          <div id="floodCard" class="panel-result">
+            <div>
+              <strong>Flood risk:</strong>
+              <div id="floodBadge" class="result-badge">
+                <span class="badge-risk low">No result yet</span>
+              </div>
+            </div>
+
+            <div class="result-column">
+              <div id="floodResult" class="result-json">
+                Result will appear here.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    
+    
+<div class="row prediction-row">
+
+  <!-- Tsunami Prediction - Centered -->
+  <div class="col-md-6 tsunami-center">
+    <div class="card prediction-card">
+
+      <form id="tsunamiForm">
+        <h4>Tsunami Prediction</h4>
+
+        <p class="form-description">
+          Enter earthquake characteristics and distance from the coast.
+        </p>
+
+        <div class="prediction-fields three-fields">
+
+          <div class="form-group">
+            <label class="field-label" for="tsunamiMagnitude">
+              Earthquake magnitude
+            </label>
+            <input
+              id="tsunamiMagnitude"
+              class="form-control"
+              name="magnitude"
+              type="number"
+              min="0"
+              max="10"
+              step="any"
+              value="7.1"
+              placeholder="e.g. 7.1"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label class="field-label" for="tsunamiDepth">
+              Earthquake depth (km)
+            </label>
+            <input
+              id="tsunamiDepth"
+              class="form-control"
+              name="depth"
+              type="number"
+              min="0"
+              step="any"
+              value="30"
+              placeholder="e.g. 30"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label class="field-label" for="coastDistance">
+              Distance to coastline (km)
+            </label>
+            <input
+              id="coastDistance"
+              class="form-control"
+              name="distance_to_coast_km"
+              type="number"
+              min="0"
+              step="any"
+              value="50"
+              placeholder="e.g. 50"
+              required
+            >
+          </div>
+
+        </div>
+
+        <button class="btn btn-primary" type="submit">
+          Predict tsunami risk
+        </button>
+      </form>
+
+      <div id="tsunamiCard" class="panel-result">
+        <div>
+          <strong>Tsunami risk:</strong>
+          <div id="tsunamiBadge" class="result-badge">
+            <span class="badge-risk low">No result yet</span>
+          </div>
+        </div>
+
+        <div class="result-column">
+          <div id="tsunamiResult" class="result-json">
+            Result will appear here.
           </div>
         </div>
       </div>
@@ -162,14 +559,343 @@
     </div>
   </div>
 
+  <!-- Quick Alert - Kept Commented Out -->
+  <!--
+  <div class="col-md-6">
+    <div class="card prediction-card">
+      <h4>Send Quick Alert</h4>
+      <p class="form-description">
+        Specify the recipient and review the message before sending.
+      </p>
+
+      <form id="alertForm" class="form-vertical">
+
+        <div class="form-group">
+          <label class="field-label" for="alertRecipient">
+            Recipient email address
+          </label>
+          <input
+            id="alertRecipient"
+            class="form-control"
+            name="to"
+            type="email"
+            placeholder="recipient@example.com"
+            required
+          >
+        </div>
+
+        <div class="form-group">
+          <label class="field-label" for="alertSubject">
+            Alert subject
+          </label>
+          <input
+            id="alertSubject"
+            class="form-control"
+            name="subject"
+            type="text"
+            value="Test Alert"
+            placeholder="Enter alert subject"
+            required
+          >
+        </div>
+
+        <div class="form-group">
+          <label class="field-label" for="alertMessage">
+            Alert message
+          </label>
+          <textarea
+            id="alertMessage"
+            class="form-control"
+            name="body"
+            rows="3"
+            placeholder="Describe the emergency and required action"
+            required
+          >This is a test alert.</textarea>
+        </div>
+
+        <div class="alert-actions">
+          <button id="alertSendBtn" class="btn btn-danger" type="submit">
+            Send alert
+          </button>
+
+          <button id="alertRefreshBtn" class="btn btn-default" type="button">
+            Refresh recent alerts
+          </button>
+        </div>
+
+        <div style="margin-top:10px;">
+          <span id="alertStatus" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+
+      <div style="margin-top:18px;">
+        <h5>Recent Alerts</h5>
+        <div id="alertsList" class="result-json">
+          Loading recent alerts…
+        </div>
+      </div>
+    </div>
+  </div>
+  -->
+
+   </div>
+
+  </div>
 </div>
 
-<script>
-  // render plotly graphs
-  const graphsData = {{graphJSON | safe}};
-  const graphIds = {{ids | safe}};
-  for (let i in graphsData) Plotly.newPlot(graphIds[i], graphsData[i].data, graphsData[i].layout);
+<footer style="background-color: #101e2a; color: #ffffff; width: 100%; min-height: 80px; padding: 25px 0; box-sizing: border-box; text-align: center; margin: 0;">
+    <p style="color: #ffffff; margin: 0;">
+        All rights reserved &copy; 2026
+    </p>
+</footer>
 
+<style>
+  /* ---------- Labels and descriptions ---------- */
+
+
+  
+/* Center the Tsunami Prediction card */
+.demo-section .prediction-row > .tsunami-center {
+    float: none;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}
+
+/* Keep the card width consistent with the other prediction cards */
+.demo-section .prediction-row > .tsunami-center > .prediction-card {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+
+  .demo-section .field-label {
+    display: block;
+    margin: 0 0 7px;
+    color: #193743;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.5;
+  }
+
+  .demo-section .form-description {
+    color: #607681;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 18px;
+  }
+
+  .demo-section .field-hint {
+    display: block;
+    margin-top: 6px;
+    color: #607681;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  /* ---------- Prediction cards and layout ---------- */
+  .demo-section .prediction-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    margin-top: 20px;
+  }
+
+  .demo-section .prediction-row > [class*="col-"] {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 16px;
+    min-width: 0;
+  }
+
+  .demo-section .prediction-card {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 22px;
+  }
+
+  .demo-section .prediction-fields {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+    margin-bottom: 18px;
+  }
+
+  .demo-section .prediction-fields.three-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .demo-section .prediction-fields.two-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .demo-section .prediction-fields .form-group {
+    width: auto !important;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .demo-section .prediction-fields .form-control {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    border: 1px solid #cbdcde;
+    border-radius: 8px;
+    color: #193743;
+    background: #fff;
+    box-shadow: none;
+  }
+
+  .demo-section .prediction-fields .form-control:focus {
+    border-color: #078f91;
+    outline: 2px solid rgba(7, 143, 145, .15);
+    outline-offset: 1px;
+  }
+
+  .demo-section .prediction-card button[type="submit"] {
+    white-space: normal;
+    line-height: 1.4;
+  }
+
+  /* ---------- Prediction result panel ---------- */
+  .demo-section .panel-result {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-height: 90px;
+    margin-top: 14px !important;
+    padding: 16px;
+    box-sizing: border-box;
+
+    background: #f3f8f7;
+    border: 1px solid #d7e7e4;
+    border-radius: 12px;
+
+    color: #23465a;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.7;
+    text-align: left;
+
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  /* If the result area is empty, show a neat placeholder. */
+  .demo-section .panel-result:empty::before {
+    content: "Your prediction will appear here after analysis.";
+    display: block;
+    color: #718096;
+    font-style: italic;
+    text-align: center;
+    padding: 10px 0;
+  }
+
+  .demo-section .panel-result > div,
+  .demo-section .result-column {
+    min-width: 0;
+    max-width: 100%;
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  .demo-section .result-badge {
+    display: inline-block;
+    margin-top: 8px;
+  }
+
+  .demo-section .result-json {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin-top: 8px;
+    padding: 12px;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #d7e7e4;
+    border-radius: 8px;
+    color: #23465a;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* ---------- Quick alert form ---------- */
+  .demo-section #alertForm .form-group {
+    width: 100%;
+    min-width: 0;
+    margin-bottom: 16px;
+  }
+
+  .demo-section #alertForm .form-control {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    border: 1px solid #cbdcde;
+    border-radius: 8px;
+  }
+
+  .demo-section #alertForm textarea.form-control {
+    min-height: 90px;
+    resize: vertical;
+  }
+
+  .demo-section .alert-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .demo-section .alert-actions button {
+    margin: 0;
+  }
+
+  /* ---------- Tablet layout ---------- */
+  @media (max-width: 991px) {
+    .demo-section .prediction-fields.three-fields {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* ---------- Mobile layout ---------- */
+  @media (max-width: 600px) {
+    .demo-section .prediction-card {
+      padding: 16px;
+    }
+
+    .demo-section .prediction-fields.three-fields,
+    .demo-section .prediction-fields.two-fields {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .demo-section .panel-result {
+      min-height: 70px;
+      padding: 14px;
+    }
+
+    .demo-section .alert-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .demo-section .alert-actions button {
+      width: 100%;
+    }
+  }
+</style>
+
+
+<script>
   // helper fetch
   async function postJSON(url, data) {
     try {
@@ -203,6 +929,45 @@
     el.innerHTML = `<span class="badge-risk ${cls}">${cls.toUpperCase()}</span>`;
   }
 
+  // Session-only prediction history table. It uses actual API responses, never demo/fabricated predictions.
+  const predictionHistory = [];
+  function summarizeResult(res) {
+    if (!res || typeof res !== 'object') return String(res || 'No result');
+    return res.prediction || res.label || res.risk || res.result || res.message || res.status || 'Response received';
+  }
+  function getRiskLabel(res, mode) {
+    if (res && typeof res.risk === 'string') return res.risk;
+    const p = Number(res && (res.flood_probability ?? res.probability ?? res.prob));
+    if (Number.isFinite(p) && p > 0) return p >= 0.75 ? 'HIGH' : p >= 0.4 ? 'MEDIUM' : 'LOW';
+    return 'Not provided';
+  }
+  function addPrediction(type, inputs, res) {
+    const risk = getRiskLabel(res);
+    predictionHistory.unshift({ time: new Date(), type, inputs, result: summarizeResult(res), risk });
+    if (predictionHistory.length > 8) predictionHistory.pop();
+    renderPredictionHistory();
+  }
+  function renderPredictionHistory() {
+    const tbody = document.getElementById('predictionTableBody');
+    const high = predictionHistory.filter(item => item.risk.toLowerCase().includes('high')).length;
+    document.getElementById('statTotal').textContent = predictionHistory.length;
+    document.getElementById('statHigh').textContent = high;
+    if (!predictionHistory.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-row">No predictions yet. Run a predictor below to populate this table.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = predictionHistory.map((item, index) => {
+      const riskText = String(item.risk || 'Not provided');
+      const low = riskText.toLowerCase();
+      const cls = low.includes('high') ? 'high' : low.includes('med') ? 'medium' : low.includes('low') ? 'low' : '';
+      return `<tr style="animation-delay:${Math.min(index, 5) * 45}ms"><td>${escapeHtml(item.time.toLocaleTimeString())}</td><td><strong>${escapeHtml(item.type)}</strong></td><td>${escapeHtml(item.inputs)}</td><td>${escapeHtml(item.result)}</td><td><span class="risk-chip ${cls}">${escapeHtml(riskText)}</span></td></tr>`;
+    }).join('');
+  }
+  document.getElementById('clearPredictionHistory').addEventListener('click', () => {
+    predictionHistory.length = 0;
+    renderPredictionHistory();
+  });
+
   // Earthquake handler
   document.getElementById('quakeForm').addEventListener('submit', async e => {
     e.preventDefault();
@@ -214,6 +979,7 @@
     document.getElementById('quakeResult').textContent = JSON.stringify(res, null, 2);
     // server uses "risk" key (string) -> color badge
     updateBadge('quakeBadge','risk', res.risk || '');
+    addPrediction('Earthquake', `lat ${payload.lat}, lon ${payload.lon}, depth ${payload.depth} km`, res);
   });
 
   // Flood handler
@@ -228,6 +994,7 @@
     // use flood_probability field if present
     const prob = (res && (res.flood_probability || res.probability || res.prob)) || 0;
     updateBadge('floodBadge','prob', prob);
+    addPrediction('Flood', `rainfall ${payload.rainfall_mm} mm, reservoir ${payload.dam_capacity_percent}%`, res);
   });
 
   // Tsunami handler
@@ -240,6 +1007,7 @@
     const res = await postJSON('/predict/tsunami', payload);
     document.getElementById('tsunamiResult').textContent = JSON.stringify(res, null, 2);
     updateBadge('tsunamiBadge','risk', res.risk || '');
+    addPrediction('Tsunami', `magnitude ${payload.magnitude}, depth ${payload.depth} km, coast ${payload.distance_to_coast_km} km`, res);
   });
 
   // Alerts: send + refresh list

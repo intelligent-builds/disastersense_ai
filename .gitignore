@@ -1,1 +1,30 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+app/.env
+app/.env.*
+!app/.env.example
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local logs
+*.log
+logs/*
+
+# IDE and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local model artifacts
 models/classifier.pkl

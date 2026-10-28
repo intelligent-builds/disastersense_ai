@@ -3,7 +3,7 @@
 # - Integrates Gemini (advanced_analysis) if available
 # - Integrates OpenRouteService (ORS) free ETA via matrix endpoint
 # - Adds in-memory cache for ORS results, improved formatting, and stores numeric ORS fields
-# NOTE: This file contains an ORS_API_KEY constant with the token you supplied.
+# Credentials are loaded from environment variables; never commit API keys.
 
 import json
 import plotly
@@ -16,6 +16,24 @@ import sys
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+# Load simple KEY=value entries from the project-root .env without overriding
+# real environment variables. This avoids requiring python-dotenv.
+def _load_project_env(path):
+    try:
+        with open(path, "r", encoding="utf-8") as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key, value = key.strip(), value.strip().strip('\"').strip("'")
+                if key and key.replace("_", "").isalnum():
+                    os.environ.setdefault(key, value)
+    except OSError:
+        pass
+
+_load_project_env(os.path.join(PROJECT_ROOT, ".env"))
 
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
@@ -323,8 +341,8 @@ def get_eta_approx_km_to_minutes(dist_km, avg_speed_kmph=35):
 # ---------------------------
 # OpenRouteService integration (FREE)
 # ---------------------------
-# User-provided ORS token (inserted as requested)
-ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImQ1OWM0MWRhOGZjMjQzYzM4ZTM2MjNmOTZlZGNiOTgyIiwiaCI6Im11cm11cjY0In0="
+# Optional OpenRouteService token from environment
+ORS_API_KEY = os.getenv("ORS_API_KEY", "")
 
 def get_eta_openrouteservice(origin_lat, origin_lon, dest_lat, dest_lon):
     """
@@ -1555,12 +1573,159 @@ def report_page():
     prefill = request.args.get("prefill", "")
     return render_template('report.html', prefill=prefill)
 
+# ---------------------------
+# Live Maharashtra monitoring API
+# ---------------------------
+from datetime import timezone
+from functools import lru_cache
+import csv
+import io
+
+LIVE_CITIES = [
+    {"name": "Mumbai", "lat": 19.0760, "lon": 72.8777},
+    {"name": "Pune", "lat": 18.5204, "lon": 73.8567},
+    {"name": "Nashik", "lat": 19.9975, "lon": 73.7898},
+    {"name": "Nagpur", "lat": 21.1458, "lon": 79.0882},
+    {"name": "Chhatrapati Sambhajinagar", "lat": 19.8762, "lon": 75.3433},
+]
+_LIVE_CACHE = {"value": None, "expires": 0}
+_LIVE_CACHE_SECONDS = 240  # provider fetch cache; browser refreshes every five minutes
+
+
+def _fetch_open_meteo(city):
+    """Fetch current conditions and short-range hourly forecast; values are provider data."""
+    params = {
+        "latitude": city["lat"], "longitude": city["lon"],
+        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,rain,showers,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m",
+        "hourly": "precipitation,temperature_2m,wind_speed_10m",
+        "forecast_days": 2,
+        "timezone": "Asia/Kolkata"
+    }
+    r = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=12)
+    r.raise_for_status()
+    payload = r.json()
+    current = payload.get("current", {})
+    hourly = payload.get("hourly", {})
+    times = hourly.get("time", [])
+    precip = hourly.get("precipitation", [])
+    temp = hourly.get("temperature_2m", [])
+    wind = hourly.get("wind_speed_10m", [])
+    # Keep the next 24 hourly forecast points from the provider's current timestamp.
+    start = 0
+    current_time = current.get("time")
+    if current_time and current_time in times:
+        start = times.index(current_time)
+    series = []
+    for i in range(start, min(start + 24, len(times))):
+        series.append({
+            "time": times[i],
+            "precipitation_mm": precip[i] if i < len(precip) else None,
+            "temperature_c": temp[i] if i < len(temp) else None,
+            "wind_kmh": wind[i] if i < len(wind) else None,
+        })
+    return {
+        "city": city["name"], "latitude": city["lat"], "longitude": city["lon"],
+        "current": current, "hourly_forecast": series,
+        "source": "Open-Meteo forecast API",
+        "source_url": "https://open-meteo.com/",
+        "timezone": payload.get("timezone", "Asia/Kolkata")
+    }
+
+
+def _fetch_firms():
+    """Fetch latest NASA FIRMS VIIRS hotspots for Maharashtra if a free MAP_KEY is configured."""
+    map_key = os.getenv("FIRMS_MAP_KEY", "").strip()
+    if not map_key:
+        return {"available": False, "message": "FIRMS_MAP_KEY is not configured. Add a free NASA FIRMS MAP_KEY to .env to enable fire detections.", "features": [], "source": "NASA FIRMS", "source_url": "https://firms.modaps.eosdis.nasa.gov/"}
+    # Approximate Maharashtra bounding box: west,south,east,north
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{map_key}/VIIRS_NOAA20_NRT/72.5,15.5,81.0,22.1/2"
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        text = r.text
+        if text.lstrip().lower().startswith(("invalid", "error", "please")):
+            raise ValueError("NASA FIRMS did not return CSV data; check the MAP_KEY and quota.")
+        rows = csv.DictReader(io.StringIO(text))
+        features = []
+        for row in rows:
+            try:
+                lat, lon = float(row["latitude"]), float(row["longitude"])
+                if not (15.5 <= lat <= 22.1 and 72.5 <= lon <= 81.0):
+                    continue
+                features.append({
+                    "latitude": lat, "longitude": lon,
+                    "acq_date": row.get("acq_date"), "acq_time": row.get("acq_time"),
+                    "confidence": row.get("confidence"), "frp": _safe_float(row.get("frp")),
+                    "satellite": row.get("satellite"), "instrument": row.get("instrument"),
+                    "daynight": row.get("daynight"), "source": "NASA FIRMS VIIRS NOAA-20 NRT"
+                })
+            except (TypeError, ValueError, KeyError):
+                continue
+        return {"available": True, "features": features[:3000], "count": len(features), "source": "NASA FIRMS VIIRS NOAA-20 NRT", "source_url": "https://firms.modaps.eosdis.nasa.gov/api/area", "fetched_at": datetime.now(timezone.utc).isoformat()}
+    except Exception as exc:
+        app.logger.warning("NASA FIRMS fetch failed: %s", exc)
+        return {"available": False, "message": "NASA FIRMS is temporarily unavailable or rejected the request. Check the MAP_KEY, quota and server logs.", "features": [], "source": "NASA FIRMS", "source_url": "https://firms.modaps.eosdis.nasa.gov/api/area"}
+
+
+def _safe_float(value):
+    try:
+        return float(value) if value not in (None, "") else None
+    except (ValueError, TypeError):
+        return None
+
+
+@app.route('/api/live-data', methods=['GET'])
+def api_live_data():
+    """Return real provider data and explicit per-source availability/errors."""
+    now = time.time()
+    if _LIVE_CACHE["value"] is not None and now < _LIVE_CACHE["expires"]:
+        cached = dict(_LIVE_CACHE["value"])
+        cached["cache"] = {"hit": True, "refresh_after_seconds": max(0, int(_LIVE_CACHE["expires"] - now))}
+        return jsonify(cached)
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    weather, weather_errors = [], []
+    for city in LIVE_CITIES:
+        try:
+            weather.append(_fetch_open_meteo(city))
+        except Exception as exc:
+            app.logger.warning("Open-Meteo fetch failed for %s: %s", city["name"], exc)
+            weather_errors.append(city["name"])
+    fires = _fetch_firms()
+    response = {
+        "region": "Maharashtra, India",
+        "fetched_at": fetched_at,
+        "refresh_interval_seconds": 300,
+        "weather": {"available": bool(weather), "cities": weather,
+                    "errors": weather_errors,
+                    "source": "Open-Meteo current conditions + hourly forecast",
+                    "source_url": "https://open-meteo.com/en/docs"},
+        "fires": fires,
+        "rainfall": {
+            "available": True,
+            "mode": "map_overlay",
+            "source": "NASA GPM IMERG precipitation-rate imagery via NASA GIBS",
+            "source_url": "https://gpm.nasa.gov/data/imerg",
+            "tile_url": "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+            "layer": "IMERG_Precipitation_Rate",
+            "note": "Satellite precipitation imagery is shown as a map overlay. It is not a point-level rainfall time series in this first version; hourly precipitation charts below are Open-Meteo forecast values and are labelled as forecasts."
+        },
+        "sources": [
+            {"name": "Open-Meteo", "status": "available" if weather else "error", "url": "https://open-meteo.com/"},
+            {"name": "NASA FIRMS", "status": "available" if fires.get("available") else "needs_key_or_error", "url": "https://firms.modaps.eosdis.nasa.gov/"},
+            {"name": "NASA GPM IMERG via GIBS", "status": "map_overlay", "url": "https://gpm.nasa.gov/data/imerg"}
+        ]
+    }
+    _LIVE_CACHE["value"] = response
+    _LIVE_CACHE["expires"] = now + _LIVE_CACHE_SECONDS
+    response["cache"] = {"hit": False, "refresh_after_seconds": _LIVE_CACHE_SECONDS}
+    return jsonify(response)
+
+
 def main():
     app.run(host='0.0.0.0', port=3001, debug=True)
 
 import endpoints
-if __name__ == '__main__':
-    main()
 
 # --- Added endpoints for frontend preview and live ETA polling ---
 import time, json, sqlite3, math
@@ -1702,3 +1867,6 @@ def api_eta_status(report_id):
         pass
     return jsonify({"status":"ok","report_id": report_id, "assigned_helpers": updated})
 # --- end added endpoints ---
+
+if __name__ == '__main__':
+    main()
