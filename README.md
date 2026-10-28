@@ -1,9 +1,6 @@
 # 🌍 Disaster Management and Response System Using Machine Learning
 
-### 👤 Author: [Aayush Goyal](mailto:aayush.10463@gmail.com)  
-**Department of Information Technology, Maharaja Agrasen Institute of Technology, New Delhi, India**
 
----
 
 ## 🧠 Overview
 
