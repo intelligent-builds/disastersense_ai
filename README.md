@@ -34,8 +34,7 @@ Flask Web Dashboard (User / Rescuer / Admin)
 ▼
 Database & Reporting (MongoDB)
 
-yaml
-Copy code
+
 
 ---
 
@@ -53,8 +52,6 @@ Disaster-Management/
 ├── requirements.txt # Python dependencies
 └── README.md # Project documentation
 
-yaml
-Copy code
 
 ---
 
